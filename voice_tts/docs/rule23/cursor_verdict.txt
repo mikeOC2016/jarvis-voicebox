@@ -1,0 +1,98 @@
+nohup: ignoring input
+## Rule 23 — Logic & architecture verdict
+
+**VERDICT: CONDITIONAL GO**
+
+Phase 1 and Phase 1.5 are **architecturally separable**. The docs do **not** both edit the same dashboard: Phase 1 targets **CFO Pipeline** (`repos/cfo_pipeline/dashboard/dashboard.py`); Phase 1.5 targets **MASTER Dashboard** (`/home/msr8109/projects/hub/app.py`). Coupling risk is operational (shared `voice_tts`, shared `TTS_API_KEY`, copy-paste drift if someone implements TTS helpers twice), not an inherent “same file” deadlock.
+
+---
+
+### 1) Phase 1 vs 1.5 isolation — hidden coupling?
+
+- **Explicit boundary (docs):** Phase 1 is event narration only; Phase 1.5 is Search Chat / RAG only; Phase 1.5 even states it must not change the Phase 1 event-narration trigger lane except shared **conventions** (backend proxy, `X-Caller`, 220-char policy).
+- **Real coupling:**
+  - **Shared service:** Single `voice_tts` LRU and latency budget for both adapters.
+  - **Shared secret shape:** Same bearer key pattern unless you graduate to per-adapter keys later.
+  - **Human/process coupling:** Both live in large `app.py` / `dashboard.py`-style files; reviewers must enforce “touch only lane X.”
+- **Doc inconsistency to resolve:** JAX audit §2 still describes **cfo_pipeline** semantic search (`8100`); Phase 1.5 correctly centers **hub** (`8101`) and Jarvis `/api/jarvis/speak`. Treat the audit’s “dashboard” section as **historical / wrong codebase** when reviewing hub work.
+
+---
+
+### 2) Phase 1.5 failure cascade — sensitive data “leaks”?
+
+| Failure | Sensitive hit in Top-K | Risk |
+|--------|-------------------------|------|
+| Local LLM down | Toggle Local | Templated fallback uses **same retrieved snippets** — **no egress to Claude** if routing is correct; snippet text can still appear in **UI/spoken locally** — that’s not cloud leakage but is **still disclosure** via screen/audio. |
+| Claude down | Claude selected, safe corpus | Fallback to **local**, then templated stack — snippets may still briefly appear in templates; Anthropic avoids receiving data. |
+| “Both brains down” | Any | Template path still reflects **what Qdrant returned** — sensitivity is bounded by retrieval, not by LLM vendor. |
+
+**Leak class to guard:** Incorrect implementation that calls **Claude (or JAX Claude Code)** when `force_local` should apply. Design says routing is uncrossable; **code must enforce allowlist before any cloud/JAX-Claude path** — not only “when Claude toggle is on.”
+
+**Metadata rule gap (below, §7):** Incomplete payload metadata ⇒ **risk of slipping sensitive hits through** as “non-sensitive” collections.
+
+---
+
+### 3) Auth: shared `TTS_API_KEY` + `X-Caller` — sound?
+
+- **Phase 1:** Sound for localhost-only `voice_tts`, **provided** production always sets `TTS_API_KEY` (docs note **auth bypass when unset** — that’s the real foot-gun).
+- **Phase 1.5:** Same model is sound (`dashboard-events` vs `dashboard-rag` attribution).
+- **Gap:** `voice_tts` does **not** interpret `X-Caller` yet — it’s adapter-side logging until Phase 2. Acceptable but means **caller ACL is bearer-only**.
+
+---
+
+### 4) JAX-as-brain (B-prime) vs Rule 27 — token isolation & `JAX_RAG_API_KEY` shape?
+
+- **Binding `POST /ask` to `127.0.0.1` does not, by itself, breach Rule 27** — the Telegram token isolation risk is **implementation**: no logging of secrets, don’t multiplex weird auth, don’t expose token via error pages, minimal new dependencies.
+- **`JAX_RAG_API_KEY` shape:** Dedicated high-entropy **Bearer secret** (e.g. 32+ bytes), env-only on hub + jax-bot process, **`Authorization: Bearer`** on every `/ask`, constant-time comparison, reject missing/weak key at startup when HTTP mode enabled. **Separate from `TTS_API_KEY`.** Optionally require `X-Caller: dashboard-rag` **only after** Bearer passes (caller is audit, not security).
+
+---
+
+### 5) Length-cap edge cases (300 JAX / 220 dashboard, “first 2 sentences”)
+
+- **No sentence-ending punctuation:** Without a deterministic rule you get either **silent over-long TTS** (400 errors) or **speaking huge blobs**. Specify: split on `.?!` optional Unicode; **else** fall back to **word-boundary truncation** to hard cap — always.
+- **First two sentences > cap:** Docs already mandate **truncate at word boundary** inside cap — good; encode as single function shared by JAX + hub to avoid divergence.
+- **JAX vs hub mismatch (290–310 style):** Not fatal but **behaviorally inconsistent**; consider one shared “speech trim” helper or explicitly accept two products.
+
+---
+
+### 6) Cache / LRU — “fragmentation”?
+
+Not classic fragmentation — **bounded LRU churn**. JAX mostly unique conversational clips → **cold synth** dominates; canned dashboard strings (**sync complete**) warm cache. Hybrid leak strings are unique → **few hits**. Operational note: JAX + hub both compete for **1000 slots** → possible eviction of dashboard hot phrases under heavy JAX chatter — acceptable for Phase 1, monitor.
+
+---
+
+### 7) Sensitive allowlist — uncrossable or bypassable?
+
+- **Fully uncrossable only if:**
+  - Enforcement runs **server-side after retrieval**, on **every** `/api/search-chat` request — browser `brain=` is **hints only**.
+  - **Before** Claude API **or** JAX `/ask` (Claude Code) **or** any cloud egress.
+- **Documented bypass risk:** Phase 1.5 §8 + §11 admits **Master Search exposes `payload_keys` only** — **metadata rules (paths, tags, inferred class) cannot be fully enforced** yet. ⇒ **Bypass path:** sensitive payload in collection **outside** explicit list or mis-tagged/low-metadata chunk.
+- **Mitigation gate:** Narrow Master Search augmentation (`snippet_chars` already planned) vs **minimal non-leaky `privacy_hints` per hit** (hashed tags, not raw paths) **or** dashboard-side classifier — until then, claim “uncrossable” is **aspirational**, not proven.
+
+---
+
+### 8) Mike’s “search PGX then auto-Claude” — which option matches?
+
+- **JAX today:** Intent-based **file-ish → search**, else **Claude Code** — **not** “always search then escalate on low score.”
+- **Phase 1.5 Option A:** User **explicit** Local/Claude toggle — matches **control & privacy**, **not** “auto-escalate” wording.
+- **Option B / B-prime:** Reuses JAX’s **escalation flavor** for non-sensitive — **closest** to **auto** behavior **for that slice**, but **B-prime as written has a logic tension:** dashboard does **8100** retrieval for privacy/grounding, then `/ask` may **re-run JAX’s 8097-centric pipeline** — **two brains / two retrievals** unless you pass **bounded context** into `/ask` and forbid re-search (spec gap today).
+- **Option C:** Best long-term **single source of truth** for routing+privacy — highest alignment with “one behavior everywhere,” hardest lift.
+
+**Opinion:** If the goal is literally **Mike’s JAX-style auto-escalation** **and** MASTER dashboard **privacy allowlist**, the clean match is **`B-prime` only if `/ask` is constrained** to consume **dashboard-approved context** (or shared library **C** extracts routing). Plain **Option A** matches governance and grounding design in Phase 1.5 doc **better than** naive **B**.
+
+---
+
+## CONDITIONAL — numbered must-fix before implementation GO
+
+1. **Enforce `TTS_API_KEY` on `voice_tts` in prod** — no reliance on bearer bypass when unset (`ADAPTER_DESIGN_PHASE1.md` §1).
+2. **Specify deterministic speech truncation** — punctuation split + **fallback word-bound** to **hard** 300/220; single shared spec (or shared helper contract) for JAX vs hub.
+3. **Close the sensitive-metadata enforcement gap** before claiming “uncrossable” — extend Master Search privacy hints or classify server-side with tests for **near-miss** collection names (`ADAPTER_DESIGN_PHASE1_5.md` §8, §11).
+4. **Reconcile Option B-prime retrieval story** — either **one retrieval owner** + pass context into JAX, **or** accept double-search and spell out **which source is authoritative** for citations and privacy (avoids subtle wrong-brain answers).
+5. **If adding JAX `/ask`:** **Bearer `JAX_RAG_API_KEY`**, localhost bind, **no Telegram token in HTTP path**, strict timeouts for dashboard UX (separate from Telegram 120s).
+6. **Align audit doc** with **hub** as Search Chat owner** — avoid implementing against **cfo_pipeline** by mistake (`JAX_CAPABILITY_AUDIT.md` §2 vs Phase 1.5 §1).
+
+---
+
+**Files referenced:** `ADAPTER_DESIGN_PHASE1.md`, `ADAPTER_DESIGN_PHASE1_5.md`, `JAX_CAPABILITY_AUDIT.md` under `/home/msr8109/projects/voice_tts/docs/`.
+
+**Follow-up:** If you want a hard **GO**, pick **A vs B-prime vs C** after resolving (4) and (3); I’d treat **A + later C** as lowest risk, **B-prime** as acceptable only with a **single retrieval / context contract** nailed down.

@@ -1,0 +1,6 @@
+text=Order 5404 is due at 3:45 PM for $1,234.56. Call 410-555-0199.
+normalized=Order five four zero four is due at three forty five P M for one thousand two hundred thirty four dollars and fifty six cents. Call four one zero, five five five, zero one nine nine.
+http=200
+total_ms=3995.1
+engine_ms=3991
+bytes=724012

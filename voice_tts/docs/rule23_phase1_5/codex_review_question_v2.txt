@@ -1,0 +1,18 @@
+You are GPT-5.4 acting as logic + edge-case reviewer.
+
+CONTEXT: Cursor (Claude Opus) reviewed PHASE1_5_DESIGN.md (voice TTS RAG integration for Master Dashboard on PGX) and returned VERDICT: NEEDS-CHANGES with these 4 issues plus 1 minor:
+
+1. X-Caller naming mismatch: design says 'master-dashboard-rag', locked spec line 700 says 'dashboard-rag'. Will get 403 from voice_tts until allowlist reconciled. Cursor calls this a silent deploy-time break.
+
+2. LLM error handling incomplete: design specifies Ollama timeout (>30s) falls back to retrieval_template, but does not address: (a) Ollama returns 200 with malformed JSON, (b) Ollama returns 5xx, (c) Ollama returns valid JSON but response.message.content is empty string, (d) Ollama connection refused.
+
+3. Boundary condition at 200 chars: spec says top_score >= 0.75 AND retrieved_snippet > 200 chars triggers LLM_SYNTHESIZE. Exactly 200 chars falls through to RETRIEVAL_TEMPLATE. Cursor questions if intentional.
+
+4. Race condition on hub restart: hub.service restarts mid-request, before rag_core fully installed but after env vars set, TTS_API_KEY=None, all speak requests fail 503. Cursor calls this a UX gap.
+
+5. (minor) allowlisted_collections filter timing: design says 'post-retrieval, before LLM context build' but doesn't specify whether total_hits in AnswerResult reflects pre-filter or post-filter count.
+
+TASK (under 400 words):
+A) For each of 1-5, agree or disagree the issue is real. State severity: CRITICAL / HIGH / MEDIUM / LOW.
+B) Any issues Cursor MISSED that you would flag? (be specific)
+C) Verdict: revise design before any code is written, OR patch during Step 2 implementation, OR accept as-is?

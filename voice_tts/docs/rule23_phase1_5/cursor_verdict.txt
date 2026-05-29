@@ -1,0 +1,31 @@
+[cursor_ask] Claude Opus reviewing 2 file(s)...
+VERDICT: NEEDS-CHANGES
+
+RATIONALE: The design is architecturally sound and Option C aligns with Phase 1a spec lines 665/688. However, there are three code-correctness issues that will cause runtime failures or security gaps: (1) the X-Caller naming mismatch between design (`master-dashboard-rag`) and locked spec line 700 (`dashboard-rag`) will cause 403 rejections until allowlist is updated, (2) the LLM timeout fallback path is specified but the error handling chain is incomplete—what happens when Ollama returns malformed JSON or 5xx?, (3) the 3-branch logic has a gap: what if `top_score >= 0.75` but snippet length is exactly 200 chars (boundary condition)?
+
+RISKS:
+- **X-Caller allowlist mismatch:** Design says `master-dashboard-rag`, locked spec line 700 says `dashboard-rag`. First deployment will get 403 from voice_tts until allowlist is reconciled. This is a deploy-time break, not a code bug, but it's a silent-break candidate.
+- **LLM error handling incomplete:** Design specifies "LLM timeout falls back to retrieval template" but doesn't address: Ollama returns 200 with malformed JSON, Ollama returns 5xx, Ollama returns valid JSON but `response.message.content` is empty string, Ollama connection refused (service down). Each needs explicit fallback path.
+- **Boundary condition at 200 chars:** Spec says `top_score >= 0.75 AND retrieved snippet > 200 chars` triggers LLM_SYNTHESIZE. Exactly 200 chars falls through to RETRIEVAL_TEMPLATE. Is this intentional? If snippets are often ~200 chars, this creates inconsistent behavior near the boundary.
+- **Race condition on hub restart:** If hub.service restarts mid-request after rag_core is installed but before env vars are set, `TTS_API_KEY` will be None and all speak requests fail 503. The fail-closed is correct but the restart window is a UX gap.
+- **`allowlisted_collections` filter timing:** Design says filter is "post-retrieval, before LLM context build" but doesn't specify whether `total_hits` in AnswerResult reflects pre-filter or post-filter count. If pre-filter, the UI will show "12 matches" when only 4 passed the filter—confusing.
+
+RECOMMENDATION:
+1. **Reconcile X-Caller name NOW before implementation.** Either update the design to use `dashboard-rag` (matching locked spec) OR add an explicit line to the design that voice_tts allowlist must be updated to include `master-dashboard-rag`. I recommend the former—use `dashboard-rag` consistently.
+
+2. **Add explicit error handling table to §4:**
+```
+| Ollama failure mode        | Fallback behavior                          |
+|----------------------------|---------------------------------------------|
+| Timeout (>30s)             | mode=retrieval_template, log WARN           |
+| HTTP 5xx                   | mode=retrieval_template, log ERROR          |
+| Malformed JSON             | mode=retrieval_template, log ERROR          |
+| Empty response content     | mode=retrieval_template, log WARN           |
+| Connection refused         | mode=retrieval_template, log ERROR          |
+```
+
+3. **Change boundary condition to `>= 200` (or explicitly document why 200 is excluded).**
+
+4. **Clarify in AnswerResult docstring:** `total_hits: int — count AFTER allowlist filter applied`
+
+Once these four items are addressed, verdict is GO.

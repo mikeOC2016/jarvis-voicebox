@@ -1,0 +1,26 @@
+nohup: ignoring input
+[codex_ask] consulting on 1 file(s) (manual)...
+  + /home/msr8109/projects/voice_tts/docs/ADAPTER_DESIGN_PHASE1A.md
+VERDICT: GO
+
+RATIONALE: Issues A and B are resolved. §7 allowed list is now limited to sync-all, structured `/api/events/speak`, and browser unlock/mute only. §5.1 is uniform across loopback and non-loopback: no bind-based carve-out, only explicit `ALLOW_UNAUTH_TTS=1`.
+
+RISKS:
+- Residual stale wording in §5.1 mentions a “non-loopback trigger above,” but the numbered rule is clear and binding.
+- Implementation must not reintroduce HIGH leak narration into Phase 1a.
+- `/api/events/speak` must hard-reject caller text and non-`sync_all_summary` events.
+
+RECOMMENDATION: Ready to implement.
+
+§7 allowed list verbatim:
+- Sync-all final voice summary only.
+- Backend `/api/events/speak` endpoint (structured-fields-only; server-derived canonical speech; see §3).
+- Browser audio unlock/mute control for sync-all summary playback only.
+
+§5.1 auth/startup rules verbatim:
+1. `voice_tts` REQUIRES `TTS_API_KEY` to be set by default on every bind interface (loopback `127.0.0.1` / `::1` AND any non-loopback). There is no bind-based carve-out; the only way to run without a key is the explicit dev/test escape in bullet 2.
+2. The only way to run `voice_tts` without `TTS_API_KEY` is to set `ALLOW_UNAUTH_TTS=1` explicitly in the service environment. This flag is documented as a **dev/test escape hatch** and is NOT for production use.
+3. If `TTS_API_KEY` is unset/empty AND `ALLOW_UNAUTH_TTS != 1`, the service MUST refuse to start. It logs a loud, single-line ERROR — `[TTS-STARTUP] refusing to start: TTS_API_KEY is unset and ALLOW_UNAUTH_TTS!=1` — and exits with non-zero status before the XTTS model is loaded (no GPU allocation).
+4. If `ALLOW_UNAUTH_TTS=1` is set explicitly, the service emits a loud WARNING — `[TTS-STARTUP] WARNING: running with unauthenticated /speak; ALLOW_UNAUTH_TTS=1 set explicitly` — and serves anyway. This preserves local-dev ergonomics without ambiguity.
+5. There is no `ENVIRONMENT` check, no `production` keyword, no implicit dev/prod inference. The escape hatch is one explicit env var.
+

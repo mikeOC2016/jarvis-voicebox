@@ -1,0 +1,6 @@
+text=APEX kill-switch activated. CFO dashboard online. JAX bot ready.
+normalized=Apex kill switch activated. C F O dashboard online. Jax bot ready.
+http=200
+total_ms=1582.2
+engine_ms=1563
+bytes=320556

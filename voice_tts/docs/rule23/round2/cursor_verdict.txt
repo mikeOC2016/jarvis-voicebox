@@ -1,0 +1,88 @@
+nohup: ignoring input
+Here is the Rule 23 logic/architecture pass on the revised Phase 1a doc (read: `ADAPTER_DESIGN_PHASE1A.md`, `rule23/SUMMARY.md`).
+
+---
+
+### 1. Round-1 must-fix vs this revision
+
+| # | Round-1 item (from `SUMMARY.md`) | Status |
+|---|----------------------------------|--------|
+| 1 | CFO event narration only in `dashboard.py`; no Search Chat there | **Closed** — §3, §7 spell CFO-only paths and exclude `/semantic-search`. |
+| 2 | Phase 1.5 → `hub/app.py` | **Out of Phase 1a scope** — correctly deferred; §0/§7 reference Phase 1b/1.5. |
+| 3 | Server-side sensitive-collection on Search Chat | **Owned by Phase 1.5** — not claimed for 1a; **note**: JAX `/voice` still runs the existing Claude path on user text (pre-existing exposure, not a new TTS escalation). |
+| 4 | Option C not B-prime | **Deferred to Phase 1.5** — §0 states Option C. |
+| 5 | Deterministic truncation + shared helper | **Closed in design** — §4 `trim_for_speech`, caps 300/220. |
+| 6 | `TTS_API_KEY` enforced; no bearer bypass | **Partially closed** — §5.1 fail-fast in **production** only; **open**: dev/test may still run with no key → bypass remains whenever `ENVIRONMENT` is not production (misconfig risk). |
+| 7 | “Uncrossable” sensitive routing / denylist on LLM routes | **Not in Phase 1a** — no new hub/RAG routes; **still applies** to future Phase 1.5; JAX unchanged. |
+| 8 | JAX `/ask` bearer etc. | **Explicitly deferred** — §0 lines 24–26. |
+| 9 | Failure cascade: never sensitive → Claude as fallback | **Closed for TTS** — §6: TTS failure → text/visual only, no cloud TTS, no LLM fallback for narration strings; Phase 1.5 rule stated for uniformity. |
+| 10 | Cache contention monitoring | **Deferred Phase 2** — §8 matches round-1. |
+| 11 | Length-cap edge cases | **Closed in spec** — §4 steps + tests (no punctuation, long token, citations). |
+| 12 | Tests (key exposure, allowlist, caps, fallback, separation) | **Planned, not executed** — §2.6, §3.6, §12 (design-level closure only). |
+
+---
+
+### 2. Phase 1a isolation from 1b / 1.5
+
+- **Intended coupling (fine):** shared `voice_text_utils`, shared `voice_tts` LRU, shared `TTS_API_KEY`, shared §6 cascade wording — all documented.
+- **Hidden / blurry coupling:**
+  - **§13 vs §3.3:** §13 locks HIGH leak to **live, unlocked browser session** and forbids queuing for next visit; §3.3 still floats `daily_sync.py` POST to `/api/events/speak` or `tts_pending` “implementation review.” That’s a **direct conflict** — cron/dashboard HTTP is not a “live browser session.”
+  - **`POST /api/events/speak` + `{ text: ... }`:** If the browser supplies free-form `text`, backend must not treat it as authoritative for financial narration — server should **derive** sync-all strings (and ideally tightly constrain leak copy), else you get a **weak trust boundary** even same-origin.
+
+---
+
+### 3. `voice_text_utils` design
+
+- **Strong:** Pure function, `len(result) <= cap`, sentence regex → accumulate until over cap → word fallback → hard chop; Unicode/codepoint-safe in Python; tests listed including idempotence.
+- **Minor spec gap:** Inter-sentence joining (spaces vs empty) should be pinned so JAX/CFO/hub never diverge on whitespace around boundaries.
+
+**Two-sentences-over-cap:** As written (“stop as soon as accumulated length would exceed cap”), taking the maximal prefix of **complete sentences** that stays ≤ cap is consistent with the example `"Sentence one."` at cap 30 — **acceptable**, though the prose could explicitly say “greedy prefix of full sentences under cap” to match implementers’ intuitions.
+
+---
+
+### 4. `TTS_API_KEY` startup guard — bypass?
+
+- **Not “no bypass whenever unset” globally:** unset key + non-production → auth bypass can remain (§5.1). **Production-only** fail-fast is clear.
+- **Residual bypass:** Production mis-set `ENVIRONMENT` (missing/wrong) could leave the old bypass behavior — worth treating as operational **must-fix** if Mike wants “no accidental open `voice_tts` on PGX.”
+
+---
+
+### 5. `X-Caller` logging vs privacy
+
+- Values are **low sensitivity** (`jax`, `dashboard-events`). Doc correctly states **adapter-side logging first**; service ignores header until Phase 2.
+- **Adequate for attribution** without embedding user content in headers — **yes**, provided logs stay `[TTS] caller=… status=…` without bodies (already implied).
+
+---
+
+### 6. Failure cascade — Claude on sensitive content?
+
+- **TTS failure path:** No route from failed `/speak` → Claude/cloud — **good**.
+- **User `/voice` path:** Stripping trigger then running **existing** `run_claude` means **any** sensitive user prompt can still reach Claude **before** TTS — that’s unchanged JAX semantics, not introduced by the adapter.
+- **CFO events:** Server-generated short strings only — **no** LLM in the Phase 1a narration path.
+
+---
+
+### 7. New must-fix items from this revision
+
+1. **Reconcile §13 (live session only, no queue)** with §3.3 `daily_sync.py` / `tts_pending` — pick one story for HIGH leak audio (recommend: **drop** cron→`/api/events/speak` for playback; **optional** server-side “pending” row read only when browser polls **after** unlock if you ever want continuity — explicitly **not** “next visit” narration).
+2. **`/api/events/speak` contract:** For `sync_all_summary`, **ignore client `text`**; build canonical strings server-side. For `leak_high`, constrain provenance (e.g. only messages tied to an authenticated dashboard action or DB-backed event id, not arbitrary strings).
+3. **`ENVIRONMENT`/production default:** Document or enforce a **safe default** for `voice_tts` on PGX (e.g. default `production` when binding non-loopback, or fail-log loudly whenever key unset regardless of env) if Mike wants zero silent bypass.
+
+---
+
+### 8. CFO event allowlist tightness
+
+- **Sync-all final summary + HIGH leak only** matches stated intent — **appropriately tight** for Phase 1a.
+- **Possible tighten (optional):** Speak HIGH only after **acknowledged** or only for **unacknowledged** HIGH (choose policy); optional **dedupe** by `event_id` to avoid repeat audio — design mentions spam/debounce but not keyed to leak id.
+
+---
+
+## Verdict: **CONDITIONAL**
+
+**Must-fix before GO:**
+
+1. Align HIGH leak playback with §13: remove or redesign `daily_sync.py` → `/api/events/speak` so it does **not** imply queued/offline playback; resolve/delete `tts_pending` ambiguity vs “no next-visit queue.”  
+2. Specify `/api/events/speak` so **sync-all narration text is server-derived**, not browser-supplied; tighten **leak_high** text provenance.  
+3. Close the **`TTS_API_KEY` / `ENVIRONMENT` misconfiguration** story (stricter default or explicit ops checklist in the design).
+
+After those three, design is **ready to implement** Phase 1a as scoped (plus §11 order: `voice_text_utils` → server guard → JAX → CFO proxy/UI → tests → Rule 23 re-pass).

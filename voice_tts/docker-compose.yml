@@ -1,0 +1,55 @@
+services:
+  voice_tts:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: voice_tts:latest
+    container_name: voice_tts
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      VOICES_DIR: /voices
+      CACHE_DIR: /cache
+      HF_HOME: /cache/huggingface
+      XDG_CACHE_HOME: /cache
+      TTS_HOME: /cache/tts
+      COQUI_TOS_AGREED: "1"
+      LOG_LEVEL: INFO
+    ports:
+      - "127.0.0.1:8050:8050"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      # :ro — service only reads voices; prep happens via prep_clip profile service
+      - ./voices:/voices:ro
+      - ./cache:/cache
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8050/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 180s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # One-shot prep service: re-prepares /voices/<name>.wav from /voices/raw/<name>_raw.wav.
+  # Only runs via `docker compose run --rm prep_clip` (profile keeps it out of `up`).
+  prep_clip:
+    image: voice_tts:latest
+    profiles: ["prep"]
+    restart: "no"
+    network_mode: none
+    entrypoint: ["python", "/opt/voice_tts/prep_reference.py"]
+    volumes:
+      - ./voices:/voices
+    environment:
+      VOICES_DIR: /voices

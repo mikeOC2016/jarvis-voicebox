@@ -1,0 +1,8 @@
+nohup: ignoring input
+**CONDITIONAL**
+
+1. **§7 “Phase 1.5 isolation”** — Under “Allowed in Phase 1a CFO dashboard adapter” it still lists **HIGH leak event narration** and the generic **`/api/events/speak` proxy** in a way that conflicts with §3 / §10 / §9.1 (sync-all only; HIGH leak deferred to Phase 1a.5). §12.2 also claims HIGH leak appears only in §9.1 and §14; §7 breaks that.
+
+2. **§5.1 startup/auth rule** — **Bullet 1** ties default `TTS_API_KEY` requirement to **non-loopback** bind only; **bullet 3** and **lines 690–691** read as **uniform** (loopback and non-loopback): refuse start if key unset and `ALLOW_UNAUTH_TTS≠1`. Pick one coherent rule and align all bullets (and §14 R2-1 mapping / round-2 “nice-to-have” line 908 if needed).
+
+**Not GO:** Round‑3 revisions address R2‑1–R2‑7 in the intended sections, but the above leaves **scope closure** and **auth spec** **internally inconsistent** — not **ready to implement** until §7 and §5.1 are reconciled.

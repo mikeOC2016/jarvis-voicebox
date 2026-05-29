@@ -1,0 +1,25 @@
+nohup: ignoring input
+[codex_ask] consulting on 1 file(s) (manual)...
+  + /home/msr8109/projects/voice_tts/docs/ADAPTER_DESIGN_PHASE1A.md
+VERDICT: NEEDS-CHANGES
+
+RATIONALE: The revision closes the big scope error: Phase 1a is now JAX + CFO only, with Phase 1b/1.5 correctly deferred. But it is not ready to implement because the TTS auth guard still has an ENVIRONMENT bypass, `X-Caller` is not actually logged by `voice_tts`, the HIGH leak browser playback path is architecturally incomplete, and `/api/events/speak` trusts caller-supplied text too much. The shared trim helper is directionally right, but its stated test case contradicts its own accumulation rule.
+
+RISKS:
+- `voice_tts` can still run unauthenticated if production starts without `ENVIRONMENT=production`.
+- Adapters may call TTS without an Authorization header if their local key env var is missing.
+- `X-Caller` attribution is adapter-side only; the synth service cannot audit actual request origin.
+- HIGH leak narration cannot reach an active browser session without SSE, WebSocket, polling, or a live event bus.
+- Public/same-origin `/api/events/speak` can become an arbitrary TTS proxy if it accepts raw `text`.
+- Trim tests are internally inconsistent: with cap 30, two “Sentence one. Sentence two.” sentences fit, so expected output cannot be only the first sentence.
+- Citation stripping regex is too narrow for future Phase 1.5 unless made case-insensitive and broader.
+
+RECOMMENDATION:
+1. Fix `voice_tts` auth now: require `TTS_API_KEY` by default; allow unauth only with explicit `ALLOW_UNAUTH_TTS=1` in dev/test. No `ENVIRONMENT` ambiguity.
+2. Make every adapter fail closed if its TTS key env var is empty. Log and skip voice; never call `/speak` unauthenticated.
+3. Add service-side `X-Caller` handling in `voice_tts`: sanitize/allowlist caller, log caller/status/latency, never log spoken text or bearer tokens.
+4. Change `/api/events/speak` so the server constructs speech. For sync-all, accept only structured result fields; for HIGH leak, accept `event_id` or an internal-only call, then DB-verify `severity='HIGH'`.
+5. Resolve HIGH leak delivery before implementation: either add a minimal live browser polling/SSE path, or remove HIGH leak narration from Phase 1a and ship sync-all only.
+6. Correct `voice_text_utils` tests: either lower the cap in the first-sentence test or expect both fitting sentences. Add explicit tests for “first sentence fits, second would exceed cap” and `cap <= 0`.
+7. Keep the CFO allowlist tight: sync-all summary and verified HIGH leak only. Do not loosen it.
+

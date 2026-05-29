@@ -1,0 +1,20 @@
+nohup: ignoring input
+[codex_ask] consulting on 1 file(s) (manual)...
+  + /home/msr8109/projects/voice_tts/docs/ADAPTER_DESIGN_PHASE1A.md
+VERDICT: GO
+
+RATIONALE: Section 13 choices are correct for Phase 1a: they minimize stale audio, scope creep, UI churn, duplicated helper logic, and browser playback failures. These decisions keep the adapter rollout inside one auditable Rule 23 envelope while preserving text/visual paths as authoritative.
+
+RISKS:
+- Sibling package imports fail unless systemd/PYTHONPATH is explicit.
+- Live-session-only leaks produce no audio when dashboard is closed.
+- Reload replay can double-speak if sessionStorage is not cleared atomically.
+- Link-cluster UI can crowd the topbar if not checked on small viewports.
+
+RECOMMENDATION:
+1. Ship the `TTS_API_KEY` startup guard inside Phase 1a; make it the first implementation checkpoint so no adapter ships against bearer-bypass production TTS.
+2. Use live-browser-session-only HIGH leak playback; stale leak narration on a later visit is operationally worse than silent audio with Telegram/visual alerts intact.
+3. Put `voice_text_utils` at `/home/msr8109/projects/voice_text_utils/`; one shared sibling package prevents drift across JAX, CFO, Phase 1b, and Phase 1.5.
+4. Place the CFO speaker/mute toggle inside the existing `link-cluster` div; it is the lowest-risk UI change and keeps Phase 1a out of topbar refactoring.
+5. Speak sync-all after reload via `sessionStorage.cfoLastSyncSummary`; reload-before-playback is too likely to kill audio, so replay once on page load and clear the key immediately.
+

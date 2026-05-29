@@ -1,0 +1,624 @@
+=== PHASE 1.5 RECON RAW DUMP ===
+Tue May 19 09:32:09 PM EDT 2026
+
+## 1. PORT MAP
+LISTEN 0      2048                     127.0.0.1:8102       0.0.0.0:*    users:(("python3",pid=2268731,fd=6))                                                          
+LISTEN 0      2048                     127.0.0.1:8105       0.0.0.0:*    users:(("uvicorn",pid=1508142,fd=13))                                                         
+LISTEN 0      4096                     127.0.0.1:8050       0.0.0.0:*                                                                                                  
+LISTEN 0      5                          0.0.0.0:8093       0.0.0.0:*    users:(("python3",pid=2982170,fd=3))                                                          
+LISTEN 0      5                          0.0.0.0:8092       0.0.0.0:*    users:(("python",pid=3811409,fd=3))                                                           
+LISTEN 0      5                          0.0.0.0:8095       0.0.0.0:*    users:(("python3",pid=3811408,fd=3))                                                          
+LISTEN 0      2048                       0.0.0.0:8094       0.0.0.0:*    users:(("python3",pid=3256081,fd=6))                                                          
+LISTEN 0      5                          0.0.0.0:8091       0.0.0.0:*    users:(("python3",pid=2982172,fd=3))                                                          
+LISTEN 0      5                          0.0.0.0:8090       0.0.0.0:*    users:(("python3",pid=799964,fd=5))                                                           
+LISTEN 0      2048                       0.0.0.0:8110       0.0.0.0:*    users:(("python3",pid=1819996,fd=6))                                                          
+LISTEN 0      2048                       0.0.0.0:8101       0.0.0.0:*    users:(("python3",pid=1840223,fd=6))                                                          
+LISTEN 0      2048                       0.0.0.0:8100       0.0.0.0:*    users:(("python3",pid=1277712,fd=26))                                                         
+LISTEN 0      2048                       0.0.0.0:8103       0.0.0.0:*    users:(("uvicorn",pid=1307180,fd=6))                                                          
+LISTEN 0      2048                       0.0.0.0:8097       0.0.0.0:*    users:(("python3",pid=2707,fd=6))                                                             
+LISTEN 0      2048                       0.0.0.0:8096       0.0.0.0:*    users:(("python",pid=530087,fd=6))                                                            
+LISTEN 0      2048                       0.0.0.0:8099       0.0.0.0:*    users:(("python3",pid=1028404,fd=3),("python3",pid=1028403,fd=3),("uvicorn",pid=1028396,fd=3))
+LISTEN 0      2048                       0.0.0.0:8098       0.0.0.0:*    users:(("python",pid=2353398,fd=13))                                                          
+
+## 2. PROCESS IDENTITY
+1840223  1-03:49:06 /usr/bin/python3 -m uvicorn app:app --host 0.0.0.0 --port 8101
+1819996  1-03:55:49 /usr/bin/python3 -m uvicorn app:app --host 0.0.0.0 --port 8110
+/home/msr8109/projects/hub
+/home/msr8109/projects/jarvis_voice
+
+## 3. SYSTEMD USER UNITS
+# /home/msr8109/.config/systemd/user/hub.service
+[Unit]
+Description=Master Dashboard Hub (port 8101)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/msr8109/projects/hub
+ExecStart=/usr/bin/python3 -m uvicorn app:app --host 0.0.0.0 --port 8101
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+
+# /home/msr8109/.config/systemd/user/jarvis-voice.service
+[Unit]
+Description=Jarvis Voice Profile Service (port 8110)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/msr8109/projects/jarvis_voice
+EnvironmentFile=-/home/msr8109/.config/jarvis-voice/openai.env
+Environment=JARVIS_VOICEBOX_PATH=/home/msr8109/projects/jarvis_voice/profiles/jarvis.voicebox.zip
+ExecStart=/usr/bin/python3 -m uvicorn app:app --host 0.0.0.0 --port 8110
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
+
+# /home/msr8109/.config/systemd/user/qdrant-master-search.service
+[Unit]
+Description=Qdrant Master Search API (port 8100)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/msr8109/projects/qdrant_master_search
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /home/msr8109/projects/qdrant_master_search/master_search_api.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+
+# /home/msr8109/.config/systemd/user/master-file-lookup.service
+[Unit]
+Description=Master File Lookup API (port 8102) — L: drive MASTER FILE 1.13 (version 2).xlsb
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/msr8109/projects/master_file_lookup
+ExecStart=/usr/bin/python3 /home/msr8109/projects/master_file_lookup/master_file_lookup_server.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/msr8109/projects/master_file_lookup/logs/service.stdout.log
+StandardError=append:/home/msr8109/projects/master_file_lookup/logs/service.stderr.log
+
+[Install]
+WantedBy=default.target
+
+## 4. SYSTEMD SYSTEM UNITS
+
+## 5. Z: vs LOCAL HUB
+47317685 /home/msr8109/PGX-DATA/projects/hub/app.py
+47317685 /home/msr8109/projects/hub/app.py
+/dev/nvme0n1p2 on /home/msr8109/PGX-DATA/projects type ext4 (rw,relatime,errors=remount-ro)
+
+## 6. HUB/APP.PY FULL READ (401 lines)
+     1	from __future__ import annotations
+     2	
+     3	import html
+     4	import json
+     5	import time
+     6	import urllib.error
+     7	import urllib.parse
+     8	import urllib.request
+     9	from dataclasses import asdict, dataclass
+    10	from datetime import datetime, timezone
+    11	from zoneinfo import ZoneInfo
+    12	from typing import Any
+    13	
+    14	from fastapi import FastAPI, HTTPException, Request
+    15	from fastapi.responses import HTMLResponse, JSONResponse, Response
+    16	
+    17	APP_NAME = "MASTER DASHBOARD"
+    18	STYLE_MARKER = "ORIGIN_STYLE_MASTER_V1"
+    19	TIMEOUT = 0.45
+    20	LOCAL_TZ = ZoneInfo("America/New_York")
+    21	JARVIS_VOICE_URL = "http://127.0.0.1:8110"
+    22	QDRANT_SEARCH_URL = "http://127.0.0.1:8100/search"
+    23	DQ_SALES_URL = "http://127.0.0.1:8090/api/dq/sales"
+    24	DEFAULT_AUTO_SEARCH_QUERY = "SALES TODAY FOR DQS"
+    25	
+    26	
+    27	@dataclass(frozen=True)
+    28	class ServiceCard:
+    29	    id: str
+    30	    group: str
+    31	    title: str
+    32	    description: str
+    33	    href: str
+    34	    probe_url: str | None
+    35	    source: str = "PGX"
+    36	    badge: str = "live"
+    37	    read_only: bool = True
+    38	
+    39	
+    40	SERVICE_CATALOG: tuple[ServiceCard, ...] = (
+    41	    ServiceCard("cfo-dashboard", "Finance", "CFO Dashboard", "Banking, loans, entities, mapping, events, and AI search.", "https://cfo.luxqozp.com/", "http://127.0.0.1:8098/healthz", badge="primary"),
+    42	    ServiceCard("cfo-loans", "Finance", "CFO Loans", "Origin-backed loan view from the CFO system.", "https://cfo.luxqozp.com/loans", "http://127.0.0.1:8098/loans", badge="finance"),
+    43	    ServiceCard("gcbw-cash-recon", "Finance", "GCBW Cash Recon", "Month-to-date sales and bank deposit reconciliation.", "http://10.0.0.190:8099/mtd", "http://127.0.0.1:8099/mtd", badge="ops"),
+    44	    ServiceCard("dq-foodsafe-logs", "Operations", "DQ FoodSafe Logs", "Store food safety logs and shared operating records.", "https://dq-foodsafe-logs.netlify.app/", "https://dq-foodsafe-logs.netlify.app/", source="Netlify", badge="ops"),
+    45	    ServiceCard("gcbw-public-site", "Operations", "GCBW Public Site", "Gold Coast Beer Wine and Liquor public storefront.", "https://goldcoastbeerwineliquor.com/", "https://goldcoastbeerwineliquor.com/", source="Public", badge="site"),
+    46	    ServiceCard("apex-dashboard", "Trading", "APEX Dashboard", "APEX intelligence dashboard and status surface.", "https://apex.luxqozp.com/", "http://127.0.0.1:8095/", badge="halted"),
+    47	    ServiceCard("bb-terminal", "Trading", "BB Terminal", "OpenBB terminal UI for market research.", "https://bb.luxqozp.com/", "http://127.0.0.1:5173/", badge="research"),
+    48	    ServiceCard("qdrant", "AI Search", "Qdrant", "Vector database dashboard and collection health.", "http://10.0.0.190:6333/dashboard", "http://127.0.0.1:6333/", badge="data"),
+    49	    ServiceCard("qdrant-master-search", "AI Search", "Qdrant Master Search", "Unified semantic search API across indexed PGX knowledge.", "http://10.0.0.190:8100/", "http://127.0.0.1:8100/health", badge="search"),
+    50	    ServiceCard("master-file-lookup", "AI Search", "Master File Lookup", "MASTER FILE lookup API status for entity and tax records.", "#master-file-lookup", "http://127.0.0.1:8102/health", badge="local"),
+    51	    ServiceCard("l-drive-search", "AI Search", "L-Drive Search", "Read-only search across the indexed bookkeeper share.", "http://10.0.0.190:8097/search?q=gcbw&limit=5", "http://127.0.0.1:8097/health", badge="search"),
+    52	    ServiceCard("jarvis-voice", "AI Search", "Jarvis Voice", "Active Executive Baritone voice profile service for the Jarvis layer.", "http://10.0.0.190:8110/api/voices", "http://127.0.0.1:8110/healthz", badge="ai"),
+    53	    ServiceCard("n8n", "Infrastructure", "n8n", "Automation workflow console.", "http://10.0.0.190:5678/", "http://127.0.0.1:5678/healthz", badge="workflow"),
+    54	    ServiceCard("dify", "Infrastructure", "Dify", "Local AI application console.", "http://10.0.0.190:3000/", "http://127.0.0.1:3000/", badge="ai"),
+    55	    ServiceCard("pgx-command-center", "Infrastructure", "PGX Command Center", "PGX service overview and system dashboard.", "http://10.0.0.190:8090/", "http://127.0.0.1:8090/", badge="ops"),
+    56	    ServiceCard("pgx-status-api", "Infrastructure", "PGX Status API", "Build and host status endpoint for PGX services.", "http://10.0.0.190:8103/health", "http://127.0.0.1:8103/health", badge="api"),
+    57	    ServiceCard("terminal", "Infrastructure", "Terminal", "Cloudflare-routed PGX browser terminal.", "https://terminal.luxqozp.com/", "http://127.0.0.1:7681/", badge="shell"),
+    58	)
+    59	
+    60	GROUPS = ("Finance", "Operations", "Trading", "AI Search", "Infrastructure")
+    61	app = FastAPI(title=APP_NAME, version="1.0.0", docs_url=None, redoc_url=None, openapi_url=None)
+    62	
+    63	
+    64	def probe_url(url: str | None, timeout: float = TIMEOUT) -> dict[str, Any]:
+    65	    if not url:
+    66	        return {"status": "link", "latency_ms": None, "checked": False}
+    67	    started = time.perf_counter()
+    68	    req = urllib.request.Request(url, method="GET", headers={"User-Agent": "master-dashboard/1.0"})
+    69	    try:
+    70	        with urllib.request.urlopen(req, timeout=timeout) as response:
+    71	            code = int(getattr(response, "status", 0) or 0)
+    72	            state = "up" if 200 <= code < 500 else "down"
+    73	            return {"status": state, "latency_ms": int((time.perf_counter() - started) * 1000), "checked": True, "code": code}
+    74	    except urllib.error.HTTPError as exc:
+    75	        state = "up" if 200 <= exc.code < 500 else "down"
+    76	        return {"status": state, "latency_ms": int((time.perf_counter() - started) * 1000), "checked": True, "code": exc.code}
+    77	    except Exception as exc:  # noqa: BLE001
+    78	        return {"status": "down", "latency_ms": int((time.perf_counter() - started) * 1000), "checked": True, "error": exc.__class__.__name__}
+    79	
+    80	
+    81	def collect_status() -> dict[str, Any]:
+    82	    cards: list[dict[str, Any]] = []
+    83	    for card in SERVICE_CATALOG:
+    84	        item = asdict(card)
+    85	        item["probe"] = probe_url(card.probe_url)
+    86	        cards.append(item)
+    87	    summary = {
+    88	        "total": len(cards),
+    89	        "up": sum(1 for card in cards if card["probe"]["status"] == "up"),
+    90	        "down": sum(1 for card in cards if card["probe"]["status"] == "down"),
+    91	        "link": sum(1 for card in cards if card["probe"]["status"] == "link"),
+    92	    }
+    93	    return {"name": APP_NAME, "read_only": True, "generated_at": datetime.now(timezone.utc).isoformat(), "summary": summary, "cards": cards}
+    94	
+    95	
+    96	def _tone(badge: str) -> str:
+    97	    if badge in {"primary", "finance", "ops", "site"}:
+    98	        return "green"
+    99	    if badge in {"halted", "research"}:
+   100	        return "amber"
+   101	    if badge in {"search", "data", "ai"}:
+   102	        return "blue"
+   103	    return "neutral"
+   104	
+   105	
+   106	def _initials(title: str) -> str:
+   107	    return "".join(part[0].upper() for part in title.replace("-", " ").split()[:2]) or "MD"
+   108	
+   109	
+   110	def _part_of_day(now: datetime | None = None) -> str:
+   111	    current = now or datetime.now(LOCAL_TZ)
+   112	    hour = current.astimezone(LOCAL_TZ).hour
+   113	    if 5 <= hour < 12:
+   114	        return "morning"
+   115	    if 12 <= hour < 17:
+   116	        return "afternoon"
+   117	    return "evening"
+   118	
+   119	
+   120	def build_greeting(status: dict[str, Any] | None = None, now: datetime | None = None) -> dict[str, Any]:
+   121	    status = status or collect_status()
+   122	    summary = status.get("summary", {})
+   123	    total = int(summary.get("total") or 0)
+   124	    up = int(summary.get("up") or 0)
+   125	    down = int(summary.get("down") or 0)
+   126	    links = int(summary.get("link") or 0)
+   127	    part = _part_of_day(now)
+   128	    if total and down == 0:
+   129	        health = f"{up} of {total} surfaces are online"
+   130	    elif total:
+   131	        health = f"{up} of {total} surfaces are online, with {down} needing attention"
+   132	    else:
+   133	        health = "the dashboard is loading"
+   134	    if links:
+   135	        health += f", and {links} reference links are available"
+   136	    jarvis_up = any(
+   137	        str(card.get("title", "")).lower() == "jarvis voice" and card.get("probe", {}).get("status") == "up"
+   138	        for card in status.get("cards", [])
+   139	    )
+   140	    jarvis_text = "Jarvis Voice is online" if jarvis_up else "Jarvis Voice is checking in"
+   141	    text = f"Good {part}, Mike. MASTER DASHBOARD is online. {health}. {jarvis_text}."
+   142	    return {"part_of_day": part, "text": text, "summary": summary}
+   143	
+   144	
+   145	def synthesize_jarvis_audio(text: str) -> tuple[bytes, dict[str, str]]:
+   146	    payload = json.dumps({"text": text, "voice_id": "jarvis"}).encode("utf-8")
+   147	    req = urllib.request.Request(
+   148	        f"{JARVIS_VOICE_URL}/api/speak",
+   149	        data=payload,
+   150	        headers={"Content-Type": "application/json"},
+   151	        method="POST",
+   152	    )
+   153	    with urllib.request.urlopen(req, timeout=420) as response:
+   154	        data = response.read()
+   155	        headers = {key.lower(): value for key, value in response.headers.items()}
+   156	    if not data.startswith(b"RIFF"):
+   157	        raise RuntimeError("Jarvis Voice did not return WAV audio")
+   158	    return data, headers
+   159	
+   160	
+   161	def search_qdrant_master(query: str) -> dict[str, Any]:
+   162	    params = urllib.parse.urlencode({"q": query, "k": 3, "total": 6})
+   163	    with urllib.request.urlopen(f"{QDRANT_SEARCH_URL}?{params}", timeout=30) as response:
+   164	        return json.loads(response.read().decode("utf-8"))
+   165	
+   166	
+   167	def fetch_dq_sales() -> dict[str, Any]:
+   168	    with urllib.request.urlopen(DQ_SALES_URL, timeout=30) as response:
+   169	        return json.loads(response.read().decode("utf-8"))
+   170	
+   171	
+   172	def _compact_snippet(value: Any, limit: int = 220) -> str:
+   173	    snippet = " ".join(str(value or "").split())
+   174	    if len(snippet) > limit:
+   175	        return snippet[: limit - 1].rstrip() + "..."
+   176	    return snippet
+   177	
+   178	
+   179	def _money(value: Any) -> str:
+   180	    try:
+   181	        amount = float(value or 0)
+   182	    except (TypeError, ValueError):
+   183	        amount = 0.0
+   184	    return f"${amount:,.2f}"
+   185	
+   186	
+   187	def _pct(value: Any) -> str:
+   188	    try:
+   189	        pct = float(value)
+   190	    except (TypeError, ValueError):
+   191	        return "no year-over-year comparison"
+   192	    direction = "up" if pct >= 0 else "down"
+   193	    return f"{direction} {abs(pct):.1f}% versus last year"
+   194	
+   195	
+   196	def _sales_timestamp(payload: dict[str, Any]) -> str:
+   197	    raw = str(payload.get("scraped_at") or "").strip()
+   198	    if not raw:
+   199	        return "the latest PAR POS scrape"
+   200	    try:
+   201	        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+   202	        if dt.tzinfo is None:
+   203	            dt = dt.replace(tzinfo=LOCAL_TZ)
+   204	        return dt.astimezone(LOCAL_TZ).strftime("%I:%M %p ET").lstrip("0")
+   205	    except ValueError:
+   206	        return raw
+   207	
+   208	
+   209	def _is_dq_sales_today_query(query: str) -> bool:
+   210	    q = query.lower()
+   211	    has_store = any(token in q for token in ("dqs", "dq", "dairy queen"))
+   212	    return has_store and "sales" in q and "today" in q
+   213	
+   214	
+   215	def build_dq_sales_answer(query: str, sales_payload: dict[str, Any]) -> dict[str, Any]:
+   216	    stores = []
+   217	    for store in sales_payload.get("stores") or []:
+   218	        today = store.get("today") or {}
+   219	        current = float(today.get("current") or 0)
+   220	        stores.append(
+   221	            {
+   222	                "store_id": str(store.get("store_id") or ""),
+   223	                "store_name": str(store.get("store_name") or "Unknown DQ"),
+   224	                "today_sales": current,
+   225	                "vs_ly_pct": today.get("vs_ly_pct"),
+   226	            }
+   227	        )
+   228	    stores.sort(key=lambda item: item["today_sales"], reverse=True)
+   229	    total = round(sum(item["today_sales"] for item in stores), 2)
+   230	    as_of = _sales_timestamp(sales_payload)
+   231	    if stores:
+   232	        store_sentence = "; ".join(
+   233	            f"{item['store_name']} {_money(item['today_sales'])}, {_pct(item['vs_ly_pct'])}"
+   234	            for item in stores
+   235	        )
+   236	        answer = f"DQS sales today are {_money(total)} total as of {as_of}. {store_sentence}."
+   237	    else:
+   238	        answer = f"I checked DQS sales today, but the PAR POS sales file has no store rows as of {as_of}."
+   239	    return {
+   240	        "query": query,
+   241	        "source": "dq_sales",
+   242	        "answer": answer,
+   243	        "total_sales_today": total,
+   244	        "as_of": as_of,
+   245	        "stores": stores,
+   246	        "results": [
+   247	            {
+   248	                "collection": "PAR POS DQ sales",
+   249	                "score": None,
+   250	                "snippet": f"{item['store_name']}: {_money(item['today_sales'])}, {_pct(item['vs_ly_pct'])}",
+   251	            }
+   252	            for item in stores
+   253	        ],
+   254	        "speakable": True,
+   255	    }
+   256	
+   257	
+   258	def build_search_chat_answer(query: str, search_payload: dict[str, Any]) -> dict[str, Any]:
+   259	    raw_results = search_payload.get("results") or []
+   260	    results = []
+   261	    for item in raw_results[:4]:
+   262	        results.append(
+   263	            {
+   264	                "collection": str(item.get("collection") or "unknown"),
+   265	                "score": item.get("score"),
+   266	                "snippet": _compact_snippet(item.get("snippet") or item.get("id") or "No snippet available."),
+   267	            }
+   268	        )
+   269	    total_hits = int(search_payload.get("total_hits") or len(results))
+   270	    collections = int(search_payload.get("collections_searched") or 0)
+   271	    if results:
+   272	        top = results[0]
+   273	        answer = (
+   274	            f"I searched PGX for {query}. I found {total_hits} matches across {collections} collections. "
+   275	            f"Top result from {top['collection']}: {top['snippet']}"
+   276	        )
+   277	    else:
+   278	        answer = f"I searched PGX for {query}. I did not find a strong match."
+   279	    return {"query": query, "answer": answer, "total_hits": total_hits, "collections_searched": collections, "results": results}
+   280	
+   281	
+   282	def render_dashboard() -> str:
+   283	    greeting_label = html.escape(f"Good {_part_of_day()}, Mike")
+   284	    default_query = html.escape(DEFAULT_AUTO_SEARCH_QUERY, quote=True)
+   285	    default_query_js = json.dumps(DEFAULT_AUTO_SEARCH_QUERY)
+   286	    sections: list[str] = []
+   287	    for group in GROUPS:
+   288	        cards = [card for card in SERVICE_CATALOG if card.group == group]
+   289	        body = []
+   290	        for card in cards:
+   291	            cid = html.escape(card.id)
+   292	            body.append(f'''<article class="card" id="{cid}" data-card-id="{cid}">
+   293	<div class="cardTop"><div class="mark">{html.escape(_initials(card.title))}</div><div class="pill" data-status-pill="{cid}">Checking</div></div>
+   294	<h3>{html.escape(card.title)}</h3><p>{html.escape(card.description)}</p>
+   295	<div class="cardFoot"><span class="badge {_tone(card.badge)}">{html.escape(card.badge.upper())}</span><span>{html.escape(card.source)}</span></div>
+   296	<a class="open" href="{html.escape(card.href, quote=True)}" target="_blank" rel="noopener" aria-label="Open {html.escape(card.title)}">Open</a>
+   297	</article>''')
+   298	        sections.append(f'''<section class="section" id="{html.escape(group.lower().replace(' ', '-'))}"><div class="sectionHead"><span>{html.escape(group)}</span><strong>{len(cards)}</strong></div><div class="grid">{''.join(body)}</div></section>''')
+   299	
+   300	    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{APP_NAME}</title><meta name="dashboard-style" content="{STYLE_MARKER}"><style>
+   301	:root{{--bg:#f6f5f2;--surface:#fff;--soft:#efede7;--ink:#111;--muted:#696969;--line:#dedbd4;--green:#0f8f5f;--blue:#1f78d1;--amber:#a16207;--shadow:0 16px 40px rgba(17,17,17,.06)}}*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:0}}.layout{{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:100vh}}.side{{border-right:1px solid var(--line);background:rgba(255,255,255,.72);padding:22px 14px;position:sticky;top:0;height:100vh}}.brand{{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;margin:0 6px 34px}}.brandMark{{width:24px;height:24px;border:2px solid var(--ink);border-radius:7px;display:grid;place-items:center;font-size:11px}}.label{{color:#9a978f;font-size:11px;text-transform:uppercase;margin:20px 10px 8px}}.nav{{height:34px;display:flex;align-items:center;padding:0 10px;border-radius:7px;color:#56534d;text-decoration:none;font-size:14px}}.nav.active,.nav:hover{{background:#e9e7e1;color:var(--ink)}}main{{padding:34px 42px 60px;min-width:0}}.top{{display:flex;justify-content:space-between;gap:22px;margin-bottom:26px}}h1{{font-size:30px;line-height:1.15;margin:0 0 8px;font-weight:650}}.sub{{margin:0;color:var(--muted);font-size:14px}}.round{{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;font-size:13px}}.metrics{{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:12px;margin-bottom:18px}}.metric{{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:15px 16px;min-height:82px}}.metric span{{display:block;color:var(--muted);font-size:12px;margin-bottom:8px}}.metric strong{{font-size:24px;font-weight:600}}.panel{{background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);margin-bottom:20px;overflow:hidden}}.panelHead{{padding:18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:14px}}.panelHead span{{color:var(--muted);font-size:12px;text-transform:uppercase}}.pulse{{display:grid;grid-template-columns:1.1fr .9fr}}.copy{{padding:26px 18px}}.copy h2{{margin:0 0 8px;font-size:22px;font-weight:620}}.copy p{{margin:0;color:var(--muted);max-width:620px;font-size:14px;line-height:1.55}}.bars{{min-height:164px;border-left:1px solid var(--line);background:linear-gradient(180deg,#fbfbfa,#f3f7f3);display:flex;align-items:end;padding:22px;gap:9px}}.bar{{flex:1;min-width:10px;border-radius:5px 5px 0 0;background:#99d8bd}}.bar:nth-child(2n){{background:#82c4ef}}.bar:nth-child(3n){{background:#e8c36b}}.section{{margin-top:16px}}.sectionHead{{height:46px;display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:12px;text-transform:uppercase}}.sectionHead strong{{color:var(--ink);font-size:13px}}.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}}.card{{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:8px;min-height:202px;padding:14px;display:flex;flex-direction:column;gap:14px}}.card:hover{{box-shadow:0 10px 26px rgba(17,17,17,.05)}}.cardTop,.cardFoot{{display:flex;align-items:center;justify-content:space-between;gap:10px}}.mark{{width:38px;height:38px;border-radius:8px;background:#f0f0ec;display:grid;place-items:center;font-weight:700;font-size:13px}}.pill{{border:1px solid var(--line);border-radius:999px;color:var(--muted);background:var(--soft);padding:4px 8px;font-size:12px}}.pill.up{{color:var(--green);background:#e5f4ec;border-color:#b7ddca}}.pill.down{{color:#9f1239;background:#fde8ee;border-color:#f4b8c9}}h3{{margin:2px 0 8px;font-size:18px;line-height:1.25;font-weight:650}}p{{margin:0;color:var(--muted);font-size:13px;line-height:1.45}}.cardFoot{{margin-top:auto;color:var(--muted);font-size:12px}}.badge{{border-radius:999px;padding:4px 8px;font-size:11px;border:1px solid var(--line)}}.green{{color:var(--green);background:#e5f4ec;border-color:#b7ddca}}.blue{{color:var(--blue);background:#e8f1fb;border-color:#bbd8f5}}.amber{{color:var(--amber);background:#fbf0d7;border-color:#ebcf91}}.neutral{{color:#4b5563;background:#eeeeea}}.open{{position:absolute;inset:0;color:transparent;text-decoration:none}}.note{{margin-top:26px;color:var(--muted);font-size:12px}}.jarvisPanel{{padding:18px;display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,.9fr);gap:18px;align-items:stretch}}.jarvisStatus{{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;margin-top:14px}}.dot{{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 5px rgba(15,143,95,.12)}}.jarvisControls{{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}}.btn{{border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:7px;min-height:38px;padding:0 14px;font:inherit;font-size:14px;cursor:pointer}}.btn.secondary{{background:#fff;color:var(--ink)}}.btn:disabled{{opacity:.55;cursor:wait}}.voiceAudio{{width:100%;margin-top:14px}}.searchBox{{border:1px solid var(--line);border-radius:8px;background:#fbfbfa;padding:14px}}.searchBox h3{{font-size:17px;margin:0 0 12px}}.searchForm{{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px}}.searchInput{{height:40px;border:1px solid var(--line);border-radius:7px;background:#fff;padding:0 12px;font:inherit;font-size:14px;min-width:0}}.searchAnswer{{margin-top:12px;color:var(--ink);font-size:14px;line-height:1.5}}.searchResults{{margin:12px 0 0;padding:0;list-style:none;display:grid;gap:8px}}.searchResults li{{border-top:1px solid var(--line);padding-top:8px;color:var(--muted);font-size:12px}}.searchResults strong{{display:block;color:var(--ink);font-size:13px;margin-bottom:3px}}@media(max-width:980px){{.layout{{grid-template-columns:1fr}}.side{{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--line)}}main{{padding:24px 16px 44px}}.metrics{{grid-template-columns:repeat(2,minmax(0,1fr))}}.pulse{{grid-template-columns:1fr}}.bars{{border-left:0;border-top:1px solid var(--line)}}}}@media(max-width:580px){{.top{{flex-direction:column}}.metrics,.grid{{grid-template-columns:1fr}}}}
+   302	</style></head><body><div class="layout" data-style="{STYLE_MARKER}"><aside class="side"><div class="brand"><span class="brandMark">MD</span><span>MASTER DASHBOARD</span></div><div class="label">Command</div><a class="nav active" href="#overview">Overview</a><a class="nav" href="#finance">Finance</a><a class="nav" href="#operations">Operations</a><a class="nav" href="#trading">Trading</a><a class="nav" href="#ai-search">AI Search</a><a class="nav" href="#infrastructure">Infrastructure</a></aside><main id="overview"><div class="top"><div><h1 id="greetingTitle">{greeting_label}</h1><p class="sub">PGX command surface for finance, operations, research, search, and infrastructure.</p></div><div class="round">PGX</div></div><div class="metrics"><div class="metric"><span>Total surfaces</span><strong id="metric-total">{len(SERVICE_CATALOG)}</strong></div><div class="metric"><span>Online</span><strong id="metric-up">--</strong></div><div class="metric"><span>Needs check</span><strong id="metric-down">--</strong></div><div class="metric"><span>Mode</span><strong>Read-only</strong></div></div><section class="panel"><div class="panelHead"><span>Net operations</span><strong id="last-updated">Checking status</strong></div><div class="pulse"><div class="copy"><h2>Everything important in one place.</h2><p>Finance, store operations, market research, AI search, and PGX infrastructure are grouped into one command surface with live health probes and direct links.</p></div><div class="bars"><div class="bar" style="height:35%"></div><div class="bar" style="height:54%"></div><div class="bar" style="height:42%"></div><div class="bar" style="height:72%"></div><div class="bar" style="height:64%"></div><div class="bar" style="height:82%"></div><div class="bar" style="height:76%"></div><div class="bar" style="height:90%"></div></div></div></section><section class="panel" id="jarvis-loading"><div class="panelHead"><span>Jarvis Voice</span><strong id="jarvisVoiceLabel">Loading voice</strong></div><div class="jarvisPanel"><div class="copy"><h2 id="jarvisGreetingText">{greeting_label}</h2><p>Jarvis speaks the dashboard load greeting and reads search chat answers using the active JARVIS Voicebox profile.</p><div class="jarvisStatus"><span class="dot"></span><span id="jarvisVoiceStatus">Preparing greeting.</span></div><div class="jarvisControls"><button class="btn" id="jarvisEnableBtn" type="button">Start Jarvis</button><button class="btn secondary" id="jarvisReplayBtn" type="button">Replay greeting</button></div><audio class="voiceAudio" id="jarvisBootAudio" preload="auto" playsinline></audio></div><div class="searchBox"><h3>Search Chat</h3><form class="searchForm" id="searchChatForm"><input class="searchInput" id="searchChatInput" name="q" autocomplete="off" placeholder="Ask PGX search..." value="{default_query}" aria-label="Search PGX"><button class="btn" type="submit">Ask</button></form><div class="searchAnswer" id="searchChatAnswer">Ask a question and Jarvis will read the answer.</div><ul class="searchResults" id="searchChatResults"></ul><audio class="voiceAudio" id="jarvisSearchAudio" preload="none" playsinline controls></audio></div></div></section>{''.join(sections)}<p class="note">MASTER DASHBOARD runs on PGX port 8101. Public hostname routing remains a separate Cloudflare dashboard action.</p></main></div><script>
+   303	const jarvisBootAudio=document.getElementById('jarvisBootAudio');
+   304	const jarvisSearchAudio=document.getElementById('jarvisSearchAudio');
+   305	const jarvisEnableBtn=document.getElementById('jarvisEnableBtn');
+   306	const jarvisReplayBtn=document.getElementById('jarvisReplayBtn');
+   307	const jarvisVoiceStatus=document.getElementById('jarvisVoiceStatus');
+   308	const jarvisGreetingText=document.getElementById('jarvisGreetingText');
+   309	const jarvisVoiceLabel=document.getElementById('jarvisVoiceLabel');
+   310	let pendingBootUrl=null;
+   311	const DEFAULT_AUTO_SEARCH_QUERY={default_query_js};
+   312	async function refreshStatus(){{try{{const r=await fetch('/api/status',{{cache:'no-store'}});const p=await r.json();document.getElementById('metric-total').textContent=p.summary.total;document.getElementById('metric-up').textContent=p.summary.up;document.getElementById('metric-down').textContent=p.summary.down;document.getElementById('last-updated').textContent=new Date(p.generated_at).toLocaleString();for(const c of p.cards){{const pill=document.querySelector(`[data-status-pill="${{c.id}}"]`);if(!pill)continue;pill.classList.remove('up','down');if(c.probe.status==='up'){{pill.classList.add('up');pill.textContent=c.probe.latency_ms===null?'Online':`Online ${{c.probe.latency_ms}}ms`;}}else if(c.probe.status==='down'){{pill.classList.add('down');pill.textContent='Check';}}else{{pill.textContent='Link';}}}}}}catch(e){{document.getElementById('last-updated').textContent='Status unavailable';}}}}
+   313	async function loadGreetingText(){{const r=await fetch('/api/jarvis/greeting',{{cache:'no-store'}});if(!r.ok)throw new Error('Greeting unavailable');const p=await r.json();jarvisGreetingText.textContent=p.text;document.getElementById('greetingTitle').textContent=`Good ${{p.part_of_day}}, Mike`;return p.text;}}
+   314	async function fetchVoice(endpoint,body){{const r=await fetch(endpoint,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:body?JSON.stringify(body):undefined}});if(!r.ok)throw new Error('Voice request failed: '+r.status);return URL.createObjectURL(await r.blob());}}
+   315	async function playUrl(audio,url){{audio.src=url;await audio.play();}}
+   316	async function playGreeting(){{jarvisEnableBtn.disabled=true;jarvisVoiceStatus.textContent='Generating Jarvis greeting...';try{{await loadGreetingText();pendingBootUrl=await fetchVoice('/api/jarvis/greeting/speak');try{{await playUrl(jarvisBootAudio,pendingBootUrl);jarvisVoiceStatus.textContent='Jarvis greeting played.';jarvisVoiceLabel.textContent='Voice active';}}catch(e){{jarvisVoiceStatus.textContent='Voice is ready. Click Start Jarvis to play.';jarvisVoiceLabel.textContent='Click to start';}}}}catch(e){{jarvisVoiceStatus.textContent=e.message;jarvisVoiceLabel.textContent='Voice check failed';}}finally{{jarvisEnableBtn.disabled=false;}}}}
+   317	jarvisEnableBtn.addEventListener('click',async()=>{{if(pendingBootUrl){{try{{await playUrl(jarvisBootAudio,pendingBootUrl);jarvisVoiceStatus.textContent='Jarvis greeting played.';jarvisVoiceLabel.textContent='Voice active';return;}}catch(e){{jarvisVoiceStatus.textContent=e.message;}}}}await playGreeting();}});
+   318	jarvisReplayBtn.addEventListener('click',playGreeting);
+   319	document.addEventListener('click',async()=>{{if(pendingBootUrl&&jarvisBootAudio.paused){{try{{await playUrl(jarvisBootAudio,pendingBootUrl);jarvisVoiceStatus.textContent='Jarvis greeting played.';jarvisVoiceLabel.textContent='Voice active';pendingBootUrl=null;}}catch(e){{}}}}}},{{once:true}});
+   320	async function runSearch(q){{const input=document.getElementById('searchChatInput');const answer=document.getElementById('searchChatAnswer');const results=document.getElementById('searchChatResults');input.value=q;if(!q)return;answer.textContent='Searching PGX...';results.innerHTML='';try{{const r=await fetch('/api/search-chat',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{q}})}});if(!r.ok)throw new Error('Search failed: '+r.status);const p=await r.json();answer.textContent=p.answer;results.innerHTML=(p.results||[]).map(item=>`<li><strong>${{item.collection}}</strong>${{item.snippet}}</li>`).join('');const voiceUrl=await fetchVoice('/api/jarvis/speak',{{text:p.answer}});try{{await playUrl(jarvisSearchAudio,voiceUrl);}}catch(e){{jarvisSearchAudio.src=voiceUrl;answer.textContent=p.answer+' Voice is ready. Click play if Chrome blocked autoplay.';}}}}catch(e){{answer.textContent=e.message;}}}}
+   321	document.getElementById('searchChatForm').addEventListener('submit',async(event)=>{{event.preventDefault();await runSearch(document.getElementById('searchChatInput').value.trim());}});
+   322	refreshStatus();window.setInterval(refreshStatus,30000);window.setTimeout(playGreeting,450);window.setTimeout(()=>runSearch(DEFAULT_AUTO_SEARCH_QUERY),1300);
+   323	</script></body></html>'''
+   324	
+   325	
+   326	@app.get("/", response_class=HTMLResponse)
+   327	def homepage() -> str:
+   328	    return render_dashboard()
+   329	
+   330	
+   331	@app.get("/healthz")
+   332	def healthz() -> dict[str, Any]:
+   333	    return {"ok": True, "name": APP_NAME, "read_only": True, "cards": len(SERVICE_CATALOG)}
+   334	
+   335	
+   336	@app.get("/api/status")
+   337	def api_status() -> JSONResponse:
+   338	    return JSONResponse(collect_status())
+   339	
+   340	
+   341	@app.get("/api/jarvis/greeting")
+   342	def api_jarvis_greeting() -> JSONResponse:
+   343	    return JSONResponse({"ok": True, **build_greeting(collect_status())})
+   344	
+   345	
+   346	@app.post("/api/jarvis/greeting/speak")
+   347	def api_jarvis_greeting_speak() -> Response:
+   348	    greeting = build_greeting(collect_status())
+   349	    try:
+   350	        audio, headers = synthesize_jarvis_audio(greeting["text"])
+   351	    except Exception as exc:  # noqa: BLE001
+   352	        raise HTTPException(status_code=502, detail="Jarvis Voice unavailable") from exc
+   353	    return Response(audio, media_type="audio/wav", headers={
+   354	        "Cache-Control": "no-store",
+   355	        "Content-Disposition": 'inline; filename="jarvis_dashboard_greeting.wav"',
+   356	        "X-Jarvis-TTS-Provider": headers.get("x-jarvis-tts-provider", "voicebox"),
+   357	        "X-Jarvis-TTS-Model": headers.get("x-jarvis-tts-model", "luxtts"),
+   358	        "X-Jarvis-TTS-Voice": headers.get("x-jarvis-tts-voice", "JARVIS"),
+   359	    })
+   360	
+   361	
+   362	@app.post("/api/jarvis/speak")
+   363	async def api_jarvis_speak(request: Request) -> Response:
+   364	    payload = await request.json()
+   365	    text = str(payload.get("text") or "").strip()
+   366	    if not text:
+   367	        raise HTTPException(status_code=400, detail="text is required")
+   368	    if len(text) > 4096:
+   369	        raise HTTPException(status_code=400, detail="text exceeds 4096 characters")
+   370	    try:
+   371	        audio, headers = synthesize_jarvis_audio(text)
+   372	    except Exception as exc:  # noqa: BLE001
+   373	        raise HTTPException(status_code=502, detail="Jarvis Voice unavailable") from exc
+   374	    return Response(audio, media_type="audio/wav", headers={
+   375	        "Cache-Control": "no-store",
+   376	        "Content-Disposition": 'inline; filename="jarvis_search_chat.wav"',
+   377	        "X-Jarvis-TTS-Provider": headers.get("x-jarvis-tts-provider", "voicebox"),
+   378	        "X-Jarvis-TTS-Model": headers.get("x-jarvis-tts-model", "luxtts"),
+   379	        "X-Jarvis-TTS-Voice": headers.get("x-jarvis-tts-voice", "JARVIS"),
+   380	    })
+   381	
+   382	
+   383	@app.post("/api/search-chat")
+   384	async def api_search_chat(request: Request) -> JSONResponse:
+   385	    payload = await request.json()
+   386	    query = str(payload.get("q") or payload.get("query") or "").strip()
+   387	    if not query:
+   388	        raise HTTPException(status_code=400, detail="q is required")
+   389	    try:
+   390	        if _is_dq_sales_today_query(query):
+   391	            answer = build_dq_sales_answer(query, fetch_dq_sales())
+   392	        else:
+   393	            answer = build_search_chat_answer(query, search_qdrant_master(query))
+   394	    except Exception as exc:  # noqa: BLE001
+   395	        raise HTTPException(status_code=502, detail="PGX search unavailable") from exc
+   396	    return JSONResponse({"ok": True, "speakable": True, **answer})
+   397	
+   398	
+   399	@app.get("/favicon.ico")
+   400	def favicon() -> JSONResponse:
+   401	    return JSONResponse({"ok": True})
+
+## 7. JARVIS_VOICE/APP.PY HEAD 80
+from __future__ import annotations
+
+from typing import Any
+from html import escape
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+
+from briefs import build_master_dashboard_brief, fetch_master_dashboard_status
+from tts_engine import EngineNotConfigured, MAX_TTS_INPUT_CHARS, get_tts_config, synthesize_speech
+from voice_profile import ACTIVE_VOICE_ID, PUBLIC_SAMPLE_FILENAME, load_sample_bytes, load_voice_profile
+
+app = FastAPI(title="Jarvis Voice", version="1.0.0", docs_url=None, redoc_url=None, openapi_url=None)
+
+
+def load_active_profile():
+    return load_voice_profile()
+
+
+def _active_public_profile() -> dict[str, Any]:
+    return load_active_profile().public_dict()
+
+
+@app.get("/healthz")
+def healthz() -> dict[str, Any]:
+    profile = load_active_profile()
+    config = get_tts_config()
+    public_profile = profile.public_dict()
+    live_synthesis = public_profile["live_synthesis"]
+    return {
+        "ok": True,
+        "service": "jarvis-voice",
+        "active_voice": profile.voice_id,
+        "display_name": profile.display_name,
+        "profile_ready": True,
+        "voicebox_role": public_profile["voicebox_role"],
+        "voicebox_sample_endpoint": public_profile["sample_endpoint"],
+        "uploaded_voicebox_direct_synthesis": config.provider == "voicebox",
+        "synthesis_engine": config.provider if config.configured else "not_configured",
+        "tts_model": config.model,
+        "tts_voice": config.public_voice,
+        "live_synthesis_voice": config.public_voice,
+    }
+
+
+@app.get("/api/voices")
+def voices() -> dict[str, Any]:
+    return {
+        "active_voice": ACTIVE_VOICE_ID,
+        "voices": [_active_public_profile()],
+    }
+
+
+@app.get("/api/voices/{voice_id}")
+def voice_detail(voice_id: str) -> dict[str, Any]:
+    if voice_id != ACTIVE_VOICE_ID:
+        raise HTTPException(status_code=404, detail="voice not found")
+    return _active_public_profile()
+
+
+@app.get("/api/voices/{voice_id}/sample.wav")
+def voice_sample(voice_id: str) -> Response:
+    if voice_id != ACTIVE_VOICE_ID:
+        raise HTTPException(status_code=404, detail="voice not found")
+    sample = load_sample_bytes(load_active_profile())
+    return Response(
+        sample,
+        media_type="audio/wav",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": f'inline; filename="{PUBLIC_SAMPLE_FILENAME}"',
+        },
+    )
+
+
+
+
+def _audio_response(audio, profile, extra_headers: dict[str, str] | None = None) -> Response:
+    headers = {
+        "Cache-Control": "no-store",
+
+## 8. JARVIS_VOICE/APP.PY WC
+268 /home/msr8109/projects/jarvis_voice/app.py
+
+## 9. HUB DIR TREE
+total 5580
+drwxrwxr-x  7 msr8109 msr8109    4096 May 18 17:43 .
+drwxrwxr-x 42 msr8109 msr8109    4096 May 19 18:49 ..
+-rw-rw-r--  1 msr8109 msr8109   31922 May 18 17:42 app.py
+drwxrwxr-x  2 msr8109 msr8109    4096 May 18 13:30 backups
+drwxrwxr-x  3 msr8109 msr8109    4096 May 18 13:30 docs
+-rw-rw-r--  1 msr8109 msr8109     837 May 18 13:48 index.html
+-rw-rw-r--  1 msr8109 msr8109 3960876 May 18 17:43 jarvis_dqs_sales_today_test.wav
+-rw-rw-r--  1 msr8109 msr8109  980012 May 18 17:34 jarvis_hub_greeting_test.wav
+-rw-rw-r--  1 msr8109 msr8109  696364 May 18 17:34 jarvis_hub_search_chat_test.wav
+drwxrwxr-x  2 msr8109 msr8109    4096 May 18 17:42 __pycache__
+drwxrwxr-x  3 msr8109 msr8109    4096 May 18 13:31 .pytest_cache
+drwxrwxr-x  3 msr8109 msr8109    4096 May 18 13:31 tests
+
+## 10. JARVIS_VOICE DIR
+total 1604
+drwxrwxr-x  8 msr8109 msr8109   4096 May 18 15:51 .
+drwxrwxr-x 42 msr8109 msr8109   4096 May 19 18:49 ..
+-rw-rw-r--  1 msr8109 msr8109  11358 May 18 17:36 app.py
+drwxrwxr-x  2 msr8109 msr8109   4096 May 18 14:37 backups
+-rw-rw-r--  1 msr8109 msr8109   2822 May 18 15:04 briefs.py
+drwxrwxr-x  3 msr8109 msr8109   4096 May 18 14:37 docs
+-rw-rw-r--  1 msr8109 msr8109 842796 May 18 15:51 jarvis_master_dashboard_voicebox_test.wav
+-rw-rw-r--  1 msr8109 msr8109 283692 May 18 15:51 jarvis_voicebox_live_test.wav
+drwxrwxr-x  2 msr8109 msr8109   4096 May 18 15:36 profiles
+drwxrwxr-x  2 msr8109 msr8109   4096 May 18 17:36 __pycache__
+drwxrwxr-x  3 msr8109 msr8109   4096 May 18 14:37 .pytest_cache
+drwxrwxr-x  3 msr8109 msr8109   4096 May 18 14:37 tests
+-rw-rw-r--  1 msr8109 msr8109   8235 May 18 15:50 tts_engine.py
+-rw-rw-r--  1 msr8109 msr8109 438316 May 18 15:48 voicebox_jarvis_test.wav
+-rw-rw-r--  1 msr8109 msr8109   4361 May 18 15:20 voice_profile.py

@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+logs/
+cache/
+voices/raw/
+voices/raw/_prep/
+test_outputs/
+*.pyc
+__pycache__
+.git
+.gitignore
+scripts/

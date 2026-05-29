@@ -1,0 +1,19 @@
+[codex_ask] consulting on 0 file(s) (manual)...
+VERDICT: NEEDS-CHANGES
+
+RATIONALE: Cursor is correct: revise the design before code is written. The spec has contract mismatches, incomplete failure semantics, and deployment sequencing gaps that will produce brittle behavior in PGX. These are cheap to fix in design and expensive to debug after integration.
+
+RISKS:
+- `X-Caller` mismatch: AGREE, HIGH. `master-dashboard-rag` vs `dashboard-rag` will cause hard 403s unless voice_tts allowlist and dashboard caller name are reconciled.
+- LLM error handling: AGREE, HIGH. Malformed JSON, 5xx, empty content, and connection refusal must all deterministically fall back with logged reason codes.
+- 200-char boundary: AGREE, LOW. Not a production breaker, but the threshold must be explicit: `> 200` or `>= 200`, with a test.
+- Hub restart race: AGREE, MEDIUM. This is a deployment/readiness gap; startup must fail closed or mark RAG unavailable until `TTS_API_KEY`, rag_core, Qdrant, and Ollama readiness pass.
+- `total_hits` timing: AGREE, LOW. `total_hits` must be post-filter for user-visible answer semantics; optionally expose `raw_hits` separately for diagnostics.
+- MISSED: no explicit startup validation for required env vars and allowed caller names.
+- MISSED: no circuit breaker/backoff for Ollama/Qdrant failures; repeated dashboard requests can create cascading latency.
+- MISSED: no schema contract for `AnswerResult`, fallback reason, confidence, source collections, and LLM mode.
+- MISSED: no prompt-injection boundary for retrieved snippets; RAG context must be quoted as untrusted source text.
+- MISSED: no latency budget for dashboard voice path; synthesis should degrade fast, not block the UI.
+
+RECOMMENDATION: Revise `PHASE1_5_DESIGN.md` before Step 2 implementation. Lock `X-Caller=dashboard-rag` everywhere or update the voice_tts allowlist to include `master-dashboard-rag`; define all LLM failure cases as `RETRIEVAL_TEMPLATE` fallback with reason codes; choose `top_score >= 0.75 AND len(snippet) >= 200`; require startup readiness validation; define `total_hits` as post-filter and add `raw_hits` only if needed. Then implement with tests for caller auth, each LLM failure mode, exact 199/200/201 char boundaries, env-missing startup, and collection filtering.
+

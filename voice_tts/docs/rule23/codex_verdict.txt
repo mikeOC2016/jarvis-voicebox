@@ -1,0 +1,29 @@
+nohup: ignoring input
+[codex_ask] consulting on 3 file(s) (manual)...
+  + /home/msr8109/projects/voice_tts/docs/ADAPTER_DESIGN_PHASE1.md
+  + /home/msr8109/projects/voice_tts/docs/ADAPTER_DESIGN_PHASE1_5.md
+  + /home/msr8109/projects/voice_tts/docs/JAX_CAPABILITY_AUDIT.md
+VERDICT: NEEDS-CHANGES
+
+RATIONALE: Phase 1 TTS event/JAX narration is mostly sound if kept isolated, opt-in, backend-proxied, and text-first. Phase 1.5 is not ready: Option B-prime violates the “uncrossable” privacy posture because JAX can run Claude Code with broad filesystem/tool access after the dashboard’s narrow Top-K precheck. A localhost `/ask` endpoint does not endanger the Telegram token by itself, but it expands a Rule 27 service into a privileged internal brain API and needs stricter boundaries.
+
+RISKS:
+- Sensitive-data leak: dashboard Top-K allowlist can pass, then JAX/Claude Code can independently search PGX, L: drive, Qdrant, or files outside the prechecked context.
+- Target confusion: Phase 1 references CFO `dashboard.py`; Phase 1.5 references MASTER DASHBOARD `/home/msr8109/projects/hub/app.py`. Do not merge these lanes.
+- Shared `TTS_API_KEY` is acceptable short-term, but attribution via `X-Caller` is only audit metadata, not access control.
+- Length caps need hard backend enforcement after citation stripping and sentence trimming; do not trust frontend limits.
+- Shared cache is fine, but unique JAX/Claude outputs will churn LRU unless opt-in and capped.
+- Sensitive allowlist is not truly uncrossable until enforced before every external LLM/tool route, not just before one dashboard retrieval call.
+- Failure cascade is safe only if Claude failure falls to local/templated without sending new sensitive context to another cloud path.
+
+RECOMMENDATION: Implement Phase 1 only. Do not approve Phase 1.5 B-prime yet.
+
+Numbered must-fix items:
+1. Keep Phase 1 dashboard event narration isolated to approved event paths only; no Search Chat/RAG changes in `dashboard.py`.
+2. Resolve dashboard target: CFO dashboard and MASTER DASHBOARD are separate apps; Phase 1.5 belongs in `/home/msr8109/projects/hub/app.py`, not CFO `dashboard.py`.
+3. Reject B-prime as written. Best match to Mike’s “search PGX then auto-Claude” intent is **C = shared controlled RAG library/service**, not JAX `/ask`, because privacy enforcement must own retrieval, context, and escalation in one bounded path.
+4. If JAX `/ask` is still pursued later, it must accept only dashboard-supplied sanitized context, must not run arbitrary Claude Code tool access, must use `JAX_RAG_API_KEY`, bind `127.0.0.1`, log no raw Q/A, and preserve Rule 27 token isolation.
+5. Enforce sensitive collection denylist server-side before any Anthropic/JAX/Claude route, with no override.
+6. Keep `Claude -> Ollama -> templated` fallback, never `local-sensitive -> Claude`.
+7. Add tests for no browser key exposure, allowlist rejection, length caps, citation stripping, TTS failure fallback, and Phase 1/Phase 1.5 route separation.
+

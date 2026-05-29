@@ -1,0 +1,13 @@
+.env
+*.env
+cache/
+__pycache__/
+*.pyc
+.pytest_cache/
+logs/
+*.log
+test_outputs/
+*.wav
+backups/
+*.bak
+*.bak_*

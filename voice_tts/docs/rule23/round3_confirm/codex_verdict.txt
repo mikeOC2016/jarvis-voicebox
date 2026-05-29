@@ -1,0 +1,16 @@
+[codex_ask] consulting on 1 file(s) (manual)...
+  + /home/msr8109/projects/voice_tts/docs/ADAPTER_DESIGN_PHASE1A.md
+VERDICT: NEEDS-CHANGES
+
+RATIONALE: The two targeted §7 fixes are clean: HIGH leak is not in the Allowed list, and `/api/events/speak` is now constrained to structured server-derived speech. But §5.1 still contains stale non-loopback language in the operational policy, and §14 repeats the old “non-loopback” framing. §12 also says HIGH leak appears only in §9.1 and §14, which is false because HIGH is still referenced elsewhere as deferred/out-of-scope.
+
+RISKS:
+- Implementer may preserve a bind-based auth carve-out despite bullet 1 saying none exists.
+- Reviewer checklist can fail on literal HIGH-reference checks even though scope intent is correct.
+- Future implementer may treat §14’s “non-loopback” language as the actual startup rule.
+
+RECOMMENDATION: Fix three doc lines, then GO:
+- In §5.1 operational policy, delete “the ‘non-loopback’ trigger above is the production guard” and restate: key required on all binds unless `ALLOW_UNAUTH_TTS=1`.
+- In §14 cursor nice-to-have note, replace “whenever the listener binds non-loopback” with “on every bind interface.”
+- In §12 checklist item 2, change “HIGH leak appears only in §9.1 and §14” to “HIGH leak appears only as explicitly deferred/out-of-scope language, with no Phase 1a implementation path.”
+
