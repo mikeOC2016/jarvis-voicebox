@@ -1,0 +1,20 @@
+[codex_ask] consulting on 3 file(s) (auto)...
+  + /home/msr8109/apex/brain_orchestrator.py
+  + /home/msr8109/apex/src/main.py
+  + /home/msr8109/apex/apex_master.py
+VERDICT: NEEDS-CHANGES
+
+RATIONALE: `normalize_tts_text()` preserves core sentence punctuation, so it is not globally flattening `. , ! ? ; :`. The real damage is numeric/context mangling: dates, percents, signed numbers, suffix units, and hyphenated speech cues are transformed into unnatural token streams XTTS will read flat or wrong.
+
+RISKS:
+- P1 `text_normalize.py:136` hyphenated words become plain spaces: `risk-on` -> `risk on`; loses phrase rhythm and semantic cue.
+- P1 `text_normalize.py:144` percentages/signed moves are mangled: `+1.25%` -> `+one point two five%`, `-3.5%` -> `-three point five%`.
+- P1 `text_normalize.py:144` dates are wrong: `05/29/2026` -> `five/twenty nine/two zero two six`.
+- P1 `text_normalize.py:144` suffix decimals break: `22.4x` -> `twenty two.4x`; same class hits `10bps`, `3M`, `0DTE`, tickers-with-numbers.
+- P2 `text_normalize.py:138-139` acronym map is narrow/case-sensitive; unknown all-caps symbols stay raw.
+- P2 `text_normalize.py:134` `None` becomes spoken `"None"` instead of empty.
+- P2 `text_normalize.py:145-147` punctuation is mostly preserved, but no long-input sentence chunking; XTTS can still sound rushed/flat on large paragraphs.
+- P2 Unicode punctuation/emoji are passed through raw; smart quotes/em dash/ellipsis may be okay, emoji/symbols are not.
+
+RECOMMENDATION: Preserve sentence punctuation, ellipses, commas, semicolons, question/exclamation marks, and useful pause markers. Normalize only dangerous tokens with context-aware rules: `%` -> `percent`, signed numbers -> `plus/minus`, dates -> spoken dates, currency -> current behavior, ticker/account IDs -> spell digits intentionally, abbreviations -> explicit lexicon. Stop blanket hyphen removal; convert only selected operational hyphens, and use comma/space where a pause is intended. Add tests for empty/None, `$1,234.56`, `+1.25%`, `05/29/2026`, `22.4x`, `0DTE`, `IBKR DU3317391`, unicode punctuation, and very long input.
+

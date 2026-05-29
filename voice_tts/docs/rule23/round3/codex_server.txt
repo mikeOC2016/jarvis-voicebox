@@ -1,0 +1,18 @@
+[codex_ask] consulting on 3 file(s) (auto)...
+  + /home/msr8109/apex/brain_orchestrator.py
+  + /home/msr8109/apex/src/main.py
+  + /home/msr8109/apex/apex_master.py
+VERDICT: NEEDS-CHANGES
+
+RATIONALE: This service materially contributes to the cheap robotic sound; it is not purely caller fault. XTTS 24k mono PCM16 is acceptable, but this implementation uses raw defaults, no prosody controls, no SSML/style/speed knobs, no sentence chunking, and streams unsmoothed raw chunks. Concurrency is also unsafe: one shared XTTS model is hit from multiple FastAPI threads without an inference gate.
+
+RISKS:
+- P0 `TTSEngine.synthesize/synthesize_stream` lines 285-325: shared XTTS model runs concurrently without a lock/queue. CUDA OOM, hangs, corrupted audio, broken streams under dashboard bursts.
+- P1 `SpeakRequest/synthesize` lines 371-374, 288-301: no prosody/style/speed/temperature/top_p controls; unconditional normalization can flatten punctuation. Robotic cadence is expected.
+- P1 `synthesize` line 285: up to 2000 chars synthesized as one block. Long-form XTTS prosody degrades: rushed, flat, bad pauses.
+- P1 `synthesize_stream/_wav_header` lines 308-325, 163-179: fake max-size WAV header plus raw chunk emission, no fade/crossfade/silence smoothing. Clients can hear clicks/gaps or mishandle EOF.
+- P1 `voice_path` lines 256-260: `voice` allows path traversal via `../name`. Auth limits exposure, but this is still sloppy security.
+- P2 `require_api_key` lines 377-383: plain string token compare, no `secrets.compare_digest`; `/health` leaks model/voices/GPU status unauthenticated.
+
+RECOMMENDATION: Change service before blaming callers. Add a single GPU inference semaphore/queue, sentence-level chunking with calibrated silence and 5-10ms fades, expose safe quality knobs (`speed`, `temperature`, `top_p`, `repetition_penalty`, optional style preset), validate `voice` against `list_voices()` only, and replace token comparison with `secrets.compare_digest`. For immediate quality improvement: have caller send punctuated sentence text, but fix this service because its current synthesis path guarantees flat JARVIS output.
+

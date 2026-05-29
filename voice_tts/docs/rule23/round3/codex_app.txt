@@ -1,0 +1,33 @@
+[codex_ask] consulting on 3 file(s) (auto)...
+  + /home/msr8109/apex/brain_orchestrator.py
+  + /home/msr8109/apex/src/main.py
+  + /home/msr8109/apex/apex_master.py
+VERDICT: NEEDS-CHANGES
+
+RATIONALE: The dashboard is not producing an assistant answer; it is reading a Qdrant retrieval receipt aloud. The core failure is `build_search_chat_answer()` plus `/api/search-chat`: retrieval, answer synthesis, persona phrasing, and speech text are collapsed into one cheap template. Voicebox may sound fine; the text being sent to it is the problem.
+
+RISKS:
+- P0 `build_search_chat_answer()` lines 321-342: speaks “I searched PGX…” summaries instead of a synthesized answer.
+- P0 `api_search_chat()` lines 732-745: no RAG synthesis layer between Qdrant retrieval and final response.
+- P1 `synthesize_jarvis_audio()` lines 208-221: does not send `X-Jarvis-TTS-*` control headers to voicebox; it only echoes response headers back.
+- P1 `/api/jarvis/speak` lines 711-729: arbitrary browser text is passed straight to TTS with no persona normalization.
+- P1 async routes call blocking `urllib` with 30s/420s timeouts; slow Qdrant or TTS can stall dashboard workers.
+- P1 JS line 664: Qdrant result fields are injected via `innerHTML`; poisoned snippets can XSS the dashboard.
+- P2 greeting lines 183-205: operational status template is robotic and re-probes status repeatedly during page load.
+- P2 DQ sales path lines 278-318: deterministic answer is acceptable, but malformed numeric fields can throw and become generic 502s.
+
+RECOMMENDATION:
+P0: Insert `retrieve -> synthesize_rag_answer -> persona_phrase_for_speech -> TTS` between `search_qdrant_master()` and `build_search_chat_answer()`. Return separate `display_answer`, `speech_text`, `sources/results`; only send `speech_text` to `/api/jarvis/speak`.
+
+P1: Default brain should be Claude API for final answer/persona synthesis. Use `gemma3:27b` only as local fallback behind `JARVIS_BRAIN_PROVIDER=claude|gemma3|auto`; default `claude`.
+
+P1: Fix voice seam in `synthesize_jarvis_audio()`: send canonical `X-Jarvis-TTS-Voice`, provider/model/style/request-id headers to voicebox, validate returned headers, and fail if fallback voice/model is used unexpectedly.
+
+P1: Make `/api/search-chat` do server-side speech generation or return a signed speech payload/id. Do not let the browser decide what “Jarvis” says.
+
+P1: Replace blocking `urllib` in async handlers with threadpool-wrapped sync calls or async HTTP client; cap TTS timeout to sane dashboard latency.
+
+P1: Escape Qdrant result rendering in JS or render with `textContent`, not `innerHTML`.
+
+P2: Add a short persona layer for greeting/status: concise executive phrasing, no collection counts in spoken output unless asked.
+
