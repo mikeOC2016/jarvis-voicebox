@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
 import sqlite3
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -26,6 +29,26 @@ JARVIS_VOICE_URL = "http://127.0.0.1:8110"
 QDRANT_SEARCH_URL = "http://127.0.0.1:8100/search"
 DQ_SALES_URL = "http://127.0.0.1:8090/api/dq/sales"
 DEFAULT_AUTO_SEARCH_QUERY = "SALES TODAY FOR DQS"
+
+# --- RAG brain routing (audit P1 #7) ---------------------------------------
+# Rule 36 PGX-LOCAL-FIRST: default to a local Ollama model. Claude is opt-in
+# only (JARVIS_BRAIN_PROVIDER=claude). "template" disables the LLM entirely.
+# Decision rationale: docs/rule23/round4_fixes/DECISIONS.md.
+JARVIS_BRAIN_PROVIDER = os.environ.get("JARVIS_BRAIN_PROVIDER", "local").strip().lower()
+JARVIS_OLLAMA_MODEL = os.environ.get("JARVIS_OLLAMA_MODEL", "gemma3:27b")
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/generate")
+ANTHROPIC_URL = os.environ.get("ANTHROPIC_URL", "https://api.anthropic.com/v1/messages")
+ANTHROPIC_MODEL = os.environ.get("JARVIS_CLAUDE_MODEL", "claude-sonnet-4-6")
+BRAIN_TIMEOUT = float(os.environ.get("JARVIS_BRAIN_TIMEOUT", "20"))
+
+# --- Server-side speech store (audit P0 #4) --------------------------------
+# Only text the server itself generated is eligible for TTS. /api/search-chat
+# stores spoken text under an opaque speech_id; /api/jarvis/speak speaks by id
+# only. Closes the arbitrary-TTS-proxy hole (browser cannot make Jarvis say
+# anything). In-process dict + TTL is sufficient for a single-host dashboard.
+SPEECH_TTL_SECONDS = float(os.environ.get("JARVIS_SPEECH_TTL_SECONDS", "900"))
+_speech_store: dict[str, dict[str, Any]] = {}
+_speech_lock = threading.Lock()
 SOCIAL_BOT_STALE_HOURS = 48
 SOCIAL_BOT_SPECS: tuple[dict[str, Any], ...] = (
     {
@@ -340,6 +363,144 @@ def build_search_chat_answer(query: str, search_payload: dict[str, Any]) -> dict
     else:
         answer = f"I searched PGX for {query}. I did not find a strong match."
     return {"query": query, "answer": answer, "total_hits": total_hits, "collections_searched": collections, "results": results}
+
+
+# ---------------------------------------------------------------------------
+# Server-side speech store (audit P0 #4)
+# ---------------------------------------------------------------------------
+
+def _now() -> float:
+    return time.time()
+
+
+def _purge_expired_speech(now: float) -> None:
+    expired = [sid for sid, rec in _speech_store.items() if rec["expires_at"] <= now]
+    for sid in expired:
+        _speech_store.pop(sid, None)
+
+
+def store_speech(text: str) -> str:
+    """Store server-generated spoken text, return an opaque speech_id."""
+    sid = uuid.uuid4().hex
+    now = _now()
+    with _speech_lock:
+        _purge_expired_speech(now)
+        _speech_store[sid] = {"text": text, "expires_at": now + SPEECH_TTL_SECONDS}
+    return sid
+
+
+def get_speech(speech_id: str) -> str | None:
+    """Return stored spoken text for a speech_id, or None if unknown/expired."""
+    now = _now()
+    with _speech_lock:
+        rec = _speech_store.get(speech_id)
+        if rec is None:
+            return None
+        if rec["expires_at"] <= now:
+            _speech_store.pop(speech_id, None)
+            return None
+        return rec["text"]
+
+
+# ---------------------------------------------------------------------------
+# RAG answer synthesis (audit P1 #7). PGX-local-first per Rule 36.
+# ---------------------------------------------------------------------------
+
+_JARVIS_PERSONA = (
+    "You are Jarvis, a concise executive assistant speaking to Mike out loud. "
+    "Answer the question in 1-3 natural spoken sentences using only the provided "
+    "PGX search context. Do not read out collection names, scores, markdown, "
+    "bullet points, or URLs. If the context does not answer the question, say so "
+    "briefly. Speak plainly, as if talking, not writing."
+)
+
+
+def _build_brain_prompt(query: str, results: list[dict[str, Any]]) -> str:
+    context_lines = []
+    for item in results:
+        snippet = _compact_snippet(item.get("snippet") or "", limit=400)
+        if snippet:
+            context_lines.append(f"- {snippet}")
+    context = "\n".join(context_lines) if context_lines else "(no results)"
+    return (
+        f"{_JARVIS_PERSONA}\n\n"
+        f"Question: {query}\n\n"
+        f"PGX search context:\n{context}\n\n"
+        f"Spoken answer:"
+    )
+
+
+def call_ollama(prompt: str) -> str:
+    """Synthesize via local Ollama (Rule 36 default). Raises on failure."""
+    payload = json.dumps({
+        "model": JARVIS_OLLAMA_MODEL,
+        "prompt": prompt,
+        "stream": False,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=BRAIN_TIMEOUT) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    return str(data.get("response") or "").strip()
+
+
+def call_claude(prompt: str) -> str:
+    """Synthesize via Claude API. Opt-in only (JARVIS_BRAIN_PROVIDER=claude)."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY not set")
+    payload = json.dumps({
+        "model": ANTHROPIC_MODEL,
+        "max_tokens": 300,
+        "messages": [{"role": "user", "content": prompt}],
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        ANTHROPIC_URL,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=BRAIN_TIMEOUT) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    blocks = data.get("content") or []
+    return "".join(b.get("text", "") for b in blocks if isinstance(b, dict)).strip()
+
+
+def brain_synthesize(query: str, results: list[dict[str, Any]]) -> str | None:
+    """Route to the configured brain. Returns spoken text, or None on failure."""
+    if JARVIS_BRAIN_PROVIDER == "template":
+        return None
+    prompt = _build_brain_prompt(query, results)
+    try:
+        if JARVIS_BRAIN_PROVIDER == "claude":
+            text = call_claude(prompt)
+        else:
+            text = call_ollama(prompt)
+    except Exception:  # noqa: BLE001 - any brain failure falls back to template
+        return None
+    return text or None
+
+
+def synthesize_rag_answer(query: str, search_payload: dict[str, Any]) -> dict[str, Any]:
+    """Retrieve -> synthesize a natural spoken answer -> fall back to template.
+
+    Returns the same shape as build_search_chat_answer plus a `synthesized` flag.
+    """
+    base = build_search_chat_answer(query, search_payload)
+    spoken = None
+    if base["results"]:
+        spoken = brain_synthesize(query, base["results"])
+    if spoken:
+        base["answer"] = spoken
+        base["synthesized"] = True
+    else:
+        base["synthesized"] = False
+    return base
 
 
 
@@ -666,7 +827,7 @@ async function playGreeting(){{jarvisEnableBtn.disabled=true;jarvisVoiceStatus.t
 jarvisEnableBtn.addEventListener('click',async()=>{{if(pendingBootUrl){{try{{await playUrl(jarvisBootAudio,pendingBootUrl);jarvisVoiceStatus.textContent='Jarvis greeting played.';jarvisVoiceLabel.textContent='Voice active';return;}}catch(e){{jarvisVoiceStatus.textContent=e.message;}}}}await playGreeting();}});
 jarvisReplayBtn.addEventListener('click',playGreeting);
 document.addEventListener('click',async()=>{{if(pendingBootUrl&&jarvisBootAudio.paused){{try{{await playUrl(jarvisBootAudio,pendingBootUrl);jarvisVoiceStatus.textContent='Jarvis greeting played.';jarvisVoiceLabel.textContent='Voice active';pendingBootUrl=null;}}catch(e){{}}}}}},{{once:true}});
-async function runSearch(q){{const input=document.getElementById('searchChatInput');const answer=document.getElementById('searchChatAnswer');const results=document.getElementById('searchChatResults');input.value=q;if(!q)return;answer.textContent='Searching PGX...';results.replaceChildren();try{{const r=await fetch('/api/search-chat',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{q}})}});if(!r.ok)throw new Error('Search failed: '+r.status);const p=await r.json();answer.textContent=p.answer;renderSearchResults(results,p.results);const voiceUrl=await fetchVoice('/api/jarvis/speak',{{text:p.answer}});try{{await playUrl(jarvisSearchAudio,voiceUrl);}}catch(e){{jarvisSearchAudio.src=voiceUrl;answer.textContent=p.answer+' Voice is ready. Click play if Chrome blocked autoplay.';}}}}catch(e){{answer.textContent=e.message;}}}}
+async function runSearch(q){{const input=document.getElementById('searchChatInput');const answer=document.getElementById('searchChatAnswer');const results=document.getElementById('searchChatResults');input.value=q;if(!q)return;answer.textContent='Searching PGX...';results.replaceChildren();try{{const r=await fetch('/api/search-chat',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{q}})}});if(!r.ok)throw new Error('Search failed: '+r.status);const p=await r.json();answer.textContent=p.answer;renderSearchResults(results,p.results);if(!p.speech_id)return;const voiceUrl=await fetchVoice('/api/jarvis/speak',{{speech_id:p.speech_id}});try{{await playUrl(jarvisSearchAudio,voiceUrl);}}catch(e){{jarvisSearchAudio.src=voiceUrl;answer.textContent=p.answer+' Voice is ready. Click play if Chrome blocked autoplay.';}}}}catch(e){{answer.textContent=e.message;}}}}
 document.getElementById('searchChatForm').addEventListener('submit',async(event)=>{{event.preventDefault();await runSearch(document.getElementById('searchChatInput').value.trim());}});
 refreshStatus();refreshSocialBots();window.setInterval(refreshStatus,30000);window.setInterval(refreshSocialBots,30000);window.setTimeout(playGreeting,450);window.setTimeout(()=>runSearch(DEFAULT_AUTO_SEARCH_QUERY),1300);
 </script></body></html>'''
@@ -715,12 +876,15 @@ def api_jarvis_greeting_speak() -> Response:
 
 @app.post("/api/jarvis/speak")
 async def api_jarvis_speak(request: Request) -> Response:
+    # Audit P0 #4: speak ONLY server-generated text, looked up by speech_id.
+    # Raw caller-supplied text is no longer accepted (closes arbitrary-TTS proxy).
     payload = await request.json()
-    text = str(payload.get("text") or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text is required")
-    if len(text) > 4096:
-        raise HTTPException(status_code=400, detail="text exceeds 4096 characters")
+    speech_id = str(payload.get("speech_id") or "").strip()
+    if not speech_id:
+        raise HTTPException(status_code=400, detail="speech_id is required")
+    text = get_speech(speech_id)
+    if text is None:
+        raise HTTPException(status_code=404, detail="speech_id not found or expired")
     try:
         audio, headers = synthesize_jarvis_audio(text)
     except Exception as exc:  # noqa: BLE001
@@ -744,10 +908,12 @@ async def api_search_chat(request: Request) -> JSONResponse:
         if _is_dq_sales_today_query(query):
             answer = build_dq_sales_answer(query, fetch_dq_sales())
         else:
-            answer = build_search_chat_answer(query, search_qdrant_master(query))
+            answer = synthesize_rag_answer(query, search_qdrant_master(query))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail="PGX search unavailable") from exc
-    return JSONResponse({"ok": True, "speakable": True, **answer})
+    # Store the spoken text server-side; the browser speaks it by speech_id only.
+    speech_id = store_speech(str(answer.get("answer") or ""))
+    return JSONResponse({"ok": True, "speakable": True, "speech_id": speech_id, **answer})
 
 
 @app.get("/favicon.ico")
