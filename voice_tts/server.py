@@ -24,6 +24,7 @@ import sys
 import time
 import wave
 import logging
+import secrets
 import threading
 from collections import OrderedDict
 from pathlib import Path
@@ -379,7 +380,9 @@ def require_api_key(authorization: Optional[str] = Header(None)):
         return
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "missing bearer token")
-    if authorization.removeprefix("Bearer ").strip() != API_KEY:
+    presented = authorization.removeprefix("Bearer ").strip()
+    # Constant-time comparison: avoids leaking the key via timing side channel.
+    if not secrets.compare_digest(presented, API_KEY):
         raise HTTPException(403, "invalid token")
 
 
