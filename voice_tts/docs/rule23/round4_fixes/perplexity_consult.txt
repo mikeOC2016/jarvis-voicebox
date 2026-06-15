@@ -1,0 +1,68 @@
+[perplexity_ask] sonar-reasoning-pro reviewing 3 file(s)...
+VERDICT: NEEDS-CHANGES  
+
+RATIONALE:  
+Q1: With Rule 36 “PGX-LOCAL-FIRST” and an already-healthy Ollama stack (Gemma/Llama present and used elsewhere as fallback), the default RAG brain for search-chat should be a **local Ollama model (gemma3/4:27b)**, with a provider toggle (env) that can be flipped to Claude only when you explicitly want external quality/IP work. Local-first for assistants with TTS is consistent with best-practice privacy and latency guidance for home/edge voice assistants using Ollama and XTTS.[3][4][7][8]  
+
+Q2: The arbitrary TTS proxy is a classic “make-the-robot-say-anything” hole; research on voice assistants and TTS misuse treats this as both a security and reputational risk, especially when triggered from browsers or untrusted clients.[3][7] The **cleanest minimal fix** that preserves your UX is **server-side speech store + `speech_id`**: the search-chat endpoint returns an opaque ID for server-generated text, and `/api/jarvis/speak` only looks up and speaks server-owned text by ID (no free-text from the client).  
+
+RISKS:  
+- **Cloud-default brain violates PGX-LOCAL-FIRST and privacy goals**  
+  - Defaulting the RAG synthesis to Claude means every search-chat question and the retrieved snippets leave the box, which undermines the explicit Rule 36 and contradicts the design pattern of similar local Jarvis/Ollama voice systems that emphasize privacy and locality.[3][7][8]  
+  - Cloud-first defaults can silently “creep” into more flows, making it harder to later enforce a strict separation between local experimentation and regulated/production trading contexts.  
+
+- **Unbounded TTS endpoint can be abused for reputational/abusive speech**  
+  - Allowing arbitrary browser-supplied text to be spoken server-side is functionally equivalent to an open “public announcement” API: any XSS, CSRF, or compromised browser session can turn JARVIS into a megaphone for harassment, scams, or misleading “trade instructions”—this kind of misuse of voice agents is a documented concern in real-time TTS projects.[3][7]  
+  - If JARVIS is ever used in a setting where others can hear it (office, clients, collaborators), having no server-side control over spoken content can create real-world reputational damage and potential compliance confusion (e.g., sounding like recommendations or instructions that did not originate from your actual strategy logic).  
+
+- **Potential regulatory confusion if spoken output diverges from logged/thesis output**  
+  - In trading systems, regulators and auditors care about what the system “decided” vs. what was “communicated.” If clients or collaborators hear JARVIS speak statements that are not logged, traceable, or tied to the actual strategy pipeline, you risk an evidentiary mismatch between recorded decisions and what the system verbally “said” about trades or market views.  
+  - A TTS API that can vocalize arbitrary client-side text (including fabricated “the system said BUY NVDA now”) makes it impossible to reliably prove that spoken guidance reflected your true models/strategies, which collides with emerging best practices for explainable AI in trading and decision-support systems.  
+
+- **Open TTS proxy increases attack surface for social-engineering and phishing**  
+  - Voice output from a “trusted” in-house Jarvis is inherently high-trust; research on conversational AI assistants notes that users overweight spoken guidance as authoritative.[1][2] If an attacker can inject arbitrary phrases (e.g., “IBKR connection error, please re-enter your credentials at URL X”), they can bootstrap phishing or internal social engineering using your own assistant’s voice.  
+  - Because XTTS supports arbitrary voices (including cloned voices), uncontrolled text channels plus TTS make impersonation attacks easier if this voice is ever reused across systems or recordings are shared.  
+
+RECOMMENDATION:  
+
+**Q1 – Brain routing for RAG synthesis**  
+- **Recommendation:**  
+  - Make the **default RAG synthesis brain a local Ollama model**: e.g., **`gemma3:27b` or `gemma4:27b`**, wired through a dedicated `task_type` like `"jarvis_rag_synthesis"` that routes to your `gemma4_27b` entry (or a new `jarvis_rag` brain) in `TASK_ROUTING`.  
+  - Add an env toggle **`JARVIS_BRAIN_PROVIDER`** with allowed values `{ "ollama", "claude" }` (and optionally `"llama3_70b"` etc.), but **default it to `"ollama"`** in code, ignoring the env if unset. Only when `JARVIS_BRAIN_PROVIDER=claude` should the system call Claude for the synthesis step.  
+  - In the RAG pipeline: `Qdrant -> construct context -> call brain_orchestrator.route_task("jarvis_rag_synthesis", prompt) -> take `.response` -> send to XTTS`.  
+
+- **Rationale (short):**  
+  - You already use Ollama as the “emergency fallback - always available locally” in the trading stack and have Gemma 4 27B specialized for JSON/agentic work; this is more than strong enough to synthesize natural answers to PGX Qdrant retrievals without paying per-call cloud tax.  
+  - Rule 36 explicitly says “PGX-LOCAL-FIRST”; the correct interpretation is: *default to local brain, allow an env-level override to Claude only when you decide the use-case justifies the quality/IP tradeoff*.  
+
+**Q2 – Close arbitrary-TTS-proxy hole**  
+- **Recommendation:**  
+  - Implement **server-side speech store with `speech_id`** as the canonical path; do not accept raw `text` from the browser for `/api/jarvis/speak`.  
+  - Concrete minimal pattern:  
+    - `POST /api/search-chat` (or `/api/jarvis/search-chat`)  
+      - Server: perform Qdrant RAG, call brain orchestrator for synthesis, generate `answer_text`.  
+      - Server: store `answer_text` in a short-lived in-memory or Redis store, indexed by a random **`speech_id`** (e.g., UUIDv4).  
+      - Response: `{ answer_text, speech_id }`.  
+    - `POST /api/jarvis/speak`  
+      - Request body: `{ "speech_id": "<id>" }` only.  
+      - Server: look up `answer_text` by `speech_id`; if present, send that text to XTTS and stream/return audio. If missing/expired, 404/410.  
+      - No other text parameters allowed. Reject or ignore any `text` fields if present.  
+  - Optional: keep a short TTL (e.g., 5–10 minutes) on speech entries and store a hash of the text in logs alongside the `speech_id` for traceability.  
+
+- **Why this over HMAC or sanitize-raw-text:**  
+  - HMAC-signed speech tokens still allow arbitrary user text as long as the browser can compute or replay the HMAC; this only proves “a client with the key asked for it,” not “the server generated this text.” This does not give you a clean provenance chain.  
+  - Sanitizing/allowlisting raw text is brittle and high-maintenance; it still leaves you open to subtle abusive or misleading phrases and makes it easy for future code to accidentally re-open direct text paths.  
+  - The **speech-store-by-ID** pattern is the minimal, unambiguous provenance guarantee: JARVIS only speaks what your server produced. It’s also a very common pattern in safer TTS/voice agent architectures.[3]  
+
+- **Exact next actions (code-level):**  
+  1. **Brain selection & env toggle**  
+     - In your Jarvis dashboard service (probably `dashboard/app.py` or equivalent), introduce a config loader:  
+       - `JARVIS_BRAIN_PROVIDER = os.getenv("JARVIS_BRAIN_PROVIDER", "ollama")`  
+       - Map `"ollama"` → `task_type="jarvis_rag_synthesis"` routed to `gemma4_27b` or `llama3_70b`.  
+       - Map `"claude"` → reuse your `run_with_brain("claude", ...)` pattern; fall back to Ollama locally if Claude fails.  
+     - Add a `BRAINS["jarvis_rag"]` or reuse `gemma4_27b` in `brain_orchestrator.py` with a `specialization` tag like `["jarvis_rag", "rag_synthesis"]`.  
+
+  2. **Implement speech store and restrict `/api/jarvis/speak`**  
+     - Add a simple speech store in the TTS service host process:  
+       - Start with an in-process dict + TTL timestamps; only move to Redis if you outgrow it.  
+       - API: `speech_id = uuid4().hex`; store `{

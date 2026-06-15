@@ -1,0 +1,20 @@
+[codex_ask] consulting on 3 file(s) (auto)...
+  + /home/msr8109/apex/brain_orchestrator.py
+  + /home/msr8109/apex/src/main.py
+  + /home/msr8109/apex/apex_master.py
+VERDICT: NEEDS-CHANGES
+
+RATIONALE: Q1: Rule 36 absolutely changes the recommendation. Default must be a provider toggle defaulting to local Ollama `gemma3:27b`, with Claude API as explicit opt-in only for proven quality gaps, strategic IP work, or admin override. Q2: The raw browser-to-TTS proxy is a control-plane hole; server-generated speech must be the only text eligible for audio.
+
+RISKS:
+- Browser can currently weaponize JARVIS voice for arbitrary speech, impersonation, profanity, social engineering, or false trade commentary.
+- Defaulting RAG synthesis to Claude violates PGX-LOCAL-FIRST and leaks Qdrant-derived internal context unnecessarily.
+- Automatic cloud fallback can silently exfiltrate proprietary RAG context during local model outages.
+- Allowlist/sanitize still leaves the browser in control of speech content and will fail against prompt-shaped or benign-looking malicious text.
+- HMAC tokens reduce tampering but still allow replay unless TTL, audience binding, and nonce tracking are done correctly.
+
+RECOMMENDATION:  
+Q1: Use `JARVIS_BRAIN_PROVIDER=local|claude`, default `local`; use `JARVIS_OLLAMA_MODEL=gemma3:27b`, fallback local `llama3.3:70b`, and require `JARVIS_ALLOW_CLOUD_FALLBACK=1` before Claude is ever used automatically. Do not reuse APEX `signal_synthesis -> claude` routing for Voice Box RAG; this is spoken knowledge synthesis, not institutional trade-thesis generation.
+
+Q2: Implement option **(a) server-side speech store**. `/api/search-chat` should synthesize the answer server-side, store `{speech_id, text, created_at, expires_at, session/user}` with a short TTL, return `speech_id`, and the browser should request audio by `speech_id` only; remove or lock down raw `/api/jarvis/speak` text input.
+
