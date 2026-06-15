@@ -255,7 +255,17 @@ class TTSEngine:
         return sorted(p.stem for p in VOICES_DIR.glob("*.wav"))
 
     def voice_path(self, voice: str) -> Path:
-        p = VOICES_DIR / f"{voice}.wav"
+        # Confine to VOICES_DIR: a voice is a single bare filename stem, never a
+        # path. Reject separators, traversal, NUL, and anything that resolves
+        # outside the voices directory (path traversal hardening).
+        if not voice or voice in (".", "..") or "\x00" in voice:
+            raise HTTPException(400, "invalid voice name")
+        if "/" in voice or "\\" in voice or os.sep in voice or voice != Path(voice).name:
+            raise HTTPException(400, "invalid voice name")
+        base = VOICES_DIR.resolve()
+        p = (base / f"{voice}.wav").resolve()
+        if p.parent != base:
+            raise HTTPException(400, "invalid voice name")
         if not p.exists():
             raise HTTPException(404, f"voice not found: {voice}")
         return p
