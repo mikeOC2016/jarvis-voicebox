@@ -114,6 +114,23 @@ ALLOW_UNAUTH_TTS = os.environ.get("ALLOW_UNAUTH_TTS", "")
 LRU_CAPACITY = int(os.environ.get("LRU_CAPACITY", "1000"))
 WARMUP_TEXT = os.environ.get("WARMUP_TEXT", "Service ready.")
 
+# ---------------------------------------------------------------------------
+# Prosody controls (audit P1 #5). XTTS on raw defaults sounds robotic; these
+# give a calmer, more natural "JARVIS" cadence and are env-overridable. Per
+# request overrides are also accepted (SpeakRequest). enable_text_splitting
+# does sentence-level chunking so long input gets natural pauses instead of one
+# rushed flat block.
+# ---------------------------------------------------------------------------
+PROSODY_DEFAULTS = {
+    "temperature": float(os.environ.get("XTTS_TEMPERATURE", "0.70")),
+    "length_penalty": float(os.environ.get("XTTS_LENGTH_PENALTY", "1.0")),
+    "repetition_penalty": float(os.environ.get("XTTS_REPETITION_PENALTY", "2.5")),
+    "top_k": int(os.environ.get("XTTS_TOP_K", "50")),
+    "top_p": float(os.environ.get("XTTS_TOP_P", "0.85")),
+    "speed": float(os.environ.get("XTTS_SPEED", "1.0")),
+}
+ENABLE_TEXT_SPLITTING = os.environ.get("XTTS_ENABLE_TEXT_SPLITTING", "1") == "1"
+
 
 # ---------------------------------------------------------------------------
 # §5.1 startup guard (ADAPTER_DESIGN_PHASE1A.md Rule 23 round 2 R2-1).
@@ -210,8 +227,31 @@ class TTSEngine:
         self.speaker_latents: dict[str, tuple] = {}
         self.audio_cache = _LRU(LRU_CAPACITY)
         self._lock = threading.Lock()
+        # Single GPU inference gate: the XTTS model is shared across FastAPI
+        # worker threads and is NOT safe to run concurrently. Serialize every
+        # inference / inference_stream call through this lock to avoid CUDA OOM,
+        # hangs, and corrupted audio under dashboard bursts (audit P1 #5 P0).
+        self._infer_lock = threading.Lock()
         self._ready = False
         self._loaded_at = None
+
+    @staticmethod
+    def _resolve_prosody(
+        speed: float | None,
+        temperature: float | None,
+        top_p: float | None,
+        repetition_penalty: float | None,
+    ) -> dict:
+        p = dict(PROSODY_DEFAULTS)
+        if speed is not None:
+            p["speed"] = speed
+        if temperature is not None:
+            p["temperature"] = temperature
+        if top_p is not None:
+            p["top_p"] = top_p
+        if repetition_penalty is not None:
+            p["repetition_penalty"] = repetition_penalty
+        return p
 
     def load(self):
         from TTS.tts.configs.xtts_config import XttsConfig
@@ -293,7 +333,17 @@ class TTSEngine:
         h.update(language.encode("utf-8"))
         return h.hexdigest()
 
-    def synthesize(self, text: str, voice: str, language: str) -> tuple[np.ndarray, int]:
+    def synthesize(
+        self,
+        text: str,
+        voice: str,
+        language: str,
+        *,
+        speed: float | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        repetition_penalty: float | None = None,
+    ) -> tuple[np.ndarray, int]:
         if not self.model:
             raise HTTPException(503, "model not loaded")
         normalized_text = normalize_tts_text(text)
@@ -304,36 +354,57 @@ class TTSEngine:
             return cached, self.sample_rate
 
         gpt_cond_latent, speaker_embedding = self._latents_for(voice)
-        out = self.model.inference(
-            text=normalized_text,
-            language=language,
-            gpt_cond_latent=gpt_cond_latent,
-            speaker_embedding=speaker_embedding,
-        )
+        prosody = self._resolve_prosody(speed, temperature, top_p, repetition_penalty)
+        # Serialize GPU inference: shared XTTS model is not concurrency-safe.
+        with self._infer_lock:
+            out = self.model.inference(
+                text=normalized_text,
+                language=language,
+                gpt_cond_latent=gpt_cond_latent,
+                speaker_embedding=speaker_embedding,
+                enable_text_splitting=ENABLE_TEXT_SPLITTING,
+                **prosody,
+            )
         audio = np.asarray(out["wav"], dtype=np.float32)
 
         with self._lock:
             self.audio_cache.put_(key, audio)
         return audio, self.sample_rate
 
-    def synthesize_stream(self, text: str, voice: str, language: str) -> Iterator[bytes]:
+    def synthesize_stream(
+        self,
+        text: str,
+        voice: str,
+        language: str,
+        *,
+        speed: float | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        repetition_penalty: float | None = None,
+    ) -> Iterator[bytes]:
         if not self.model:
             raise HTTPException(503, "model not loaded")
         normalized_text = normalize_tts_text(text)
         gpt_cond_latent, speaker_embedding = self._latents_for(voice)
-        chunks = self.model.inference_stream(
-            text=normalized_text,
-            language=language,
-            gpt_cond_latent=gpt_cond_latent,
-            speaker_embedding=speaker_embedding,
-        )
-        yield _wav_header(self.sample_rate)
-        for chunk in chunks:
-            if torch.is_tensor(chunk):
-                arr = chunk.detach().cpu().numpy().astype(np.float32)
-            else:
-                arr = np.asarray(chunk, dtype=np.float32)
-            yield _f32_to_pcm16_bytes(arr)
+        prosody = self._resolve_prosody(speed, temperature, top_p, repetition_penalty)
+        # Hold the inference gate for the lifetime of the stream so a single GPU
+        # serves one stream at a time (audit P1 #5 P0).
+        with self._infer_lock:
+            chunks = self.model.inference_stream(
+                text=normalized_text,
+                language=language,
+                gpt_cond_latent=gpt_cond_latent,
+                speaker_embedding=speaker_embedding,
+                enable_text_splitting=ENABLE_TEXT_SPLITTING,
+                **prosody,
+            )
+            yield _wav_header(self.sample_rate)
+            for chunk in chunks:
+                if torch.is_tensor(chunk):
+                    arr = chunk.detach().cpu().numpy().astype(np.float32)
+                else:
+                    arr = np.asarray(chunk, dtype=np.float32)
+                yield _f32_to_pcm16_bytes(arr)
 
 
 engine = TTSEngine()
@@ -383,6 +454,11 @@ class SpeakRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000)
     voice: str = Field(DEFAULT_VOICE)
     language: str = Field(DEFAULT_LANG)
+    # Optional prosody overrides; None falls back to PROSODY_DEFAULTS.
+    speed: Optional[float] = Field(None, ge=0.5, le=2.0)
+    temperature: Optional[float] = Field(None, ge=0.1, le=1.5)
+    top_p: Optional[float] = Field(None, ge=0.1, le=1.0)
+    repetition_penalty: Optional[float] = Field(None, ge=1.0, le=10.0)
 
 
 def require_api_key(authorization: Optional[str] = Header(None)):
@@ -430,7 +506,15 @@ def voices():
 @app.post("/speak", dependencies=[Depends(require_api_key)])
 def speak(req: SpeakRequest):
     t0 = time.time()
-    audio, sr = engine.synthesize(req.text, req.voice, req.language)
+    audio, sr = engine.synthesize(
+        req.text,
+        req.voice,
+        req.language,
+        speed=req.speed,
+        temperature=req.temperature,
+        top_p=req.top_p,
+        repetition_penalty=req.repetition_penalty,
+    )
     wav = _wav_bytes(audio, sr)
     elapsed_ms = int((time.time() - t0) * 1000)
     return Response(
@@ -449,7 +533,15 @@ def speak(req: SpeakRequest):
 
 @app.post("/speak/stream", dependencies=[Depends(require_api_key)])
 def speak_stream(req: SpeakRequest):
-    gen = engine.synthesize_stream(req.text, req.voice, req.language)
+    gen = engine.synthesize_stream(
+        req.text,
+        req.voice,
+        req.language,
+        speed=req.speed,
+        temperature=req.temperature,
+        top_p=req.top_p,
+        repetition_penalty=req.repetition_penalty,
+    )
     return StreamingResponse(
         gen,
         media_type="audio/wav",

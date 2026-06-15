@@ -60,10 +60,10 @@ def client(server_module, monkeypatch):
     fake_audio = np.zeros(2400, dtype=np.float32)  # 0.1 s of silence at 24 kHz
     sample_rate = 24000
 
-    def fake_synth(text: str, voice: str, language: str):
+    def fake_synth(text: str, voice: str, language: str, **kwargs):
         return fake_audio, sample_rate
 
-    def fake_stream(text: str, voice: str, language: str) -> Iterator[bytes]:
+    def fake_stream(text: str, voice: str, language: str, **kwargs) -> Iterator[bytes]:
         # Yield a single tiny WAV-ish chunk; the test does not parse audio.
         yield b"\x00\x00\x00\x00"
 
