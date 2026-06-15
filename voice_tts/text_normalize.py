@@ -116,21 +116,85 @@ def _expand_phone(match: re.Match[str]) -> str:
     return ", ".join(_digits_to_words(part) for part in match.groups())
 
 
-def _expand_number(match: re.Match[str]) -> str:
-    token = match.group(0)
-    clean = token.replace(",", "")
+_MONTHS = [
+    "", "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+
+_ORD_ONES = {
+    1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth",
+    6: "sixth", 7: "seventh", 8: "eighth", 9: "ninth", 10: "tenth",
+    11: "eleventh", 12: "twelfth", 13: "thirteenth", 14: "fourteenth",
+    15: "fifteenth", 16: "sixteenth", 17: "seventeenth", 18: "eighteenth",
+    19: "nineteenth",
+}
+_ORD_TENS = {20: "twentieth", 30: "thirtieth"}
+
+
+def _speak_number(tok: str) -> str:
+    """Speak a numeric token the way _expand_number does, from a bare string."""
+    clean = tok.replace(",", "")
     if "." in clean:
         left, right = clean.split(".", 1)
-        return _int_to_words(int(left)) + " point " + _digits_to_words(right)
-    if "," in token:
+        left_words = _int_to_words(int(left)) if left else "zero"
+        return left_words + " point " + _digits_to_words(right)
+    if "," in tok:
         return _int_to_words(int(clean))
     if len(clean) >= 4:
         return _digits_to_words(clean)
     return _int_to_words(int(clean))
 
 
+def _spell_letters(s: str) -> str:
+    """Spell a run of letters: 'DTE' -> 'D T E', single letter unchanged."""
+    return s if len(s) == 1 else " ".join(s)
+
+
+def _ordinal_day(n: int) -> str:
+    if 1 <= n < 20:
+        return _ORD_ONES[n]
+    if n in _ORD_TENS:
+        return _ORD_TENS[n]
+    tens, ones = divmod(n, 10)
+    return f"{_TENS[tens]} {_ORD_ONES[ones]}"
+
+
+def _expand_number(match: re.Match[str]) -> str:
+    return _speak_number(match.group(0))
+
+
+def _expand_percent(match: re.Match[str]) -> str:
+    sign = match.group(1)
+    prefix = "plus " if sign == "+" else "minus " if sign == "-" else ""
+    return prefix + _speak_number(match.group(2)) + " percent"
+
+
+def _expand_date(match: re.Match[str]) -> str:
+    month, day, year_raw = int(match.group(1)), int(match.group(2)), match.group(3)
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return match.group(0)
+    return f"{_MONTHS[month]} {_ordinal_day(day)}, {_int_to_words(int(year_raw))}"
+
+
+def _expand_num_suffix(match: re.Match[str]) -> str:
+    """Digits-then-letters: '22.4x' -> 'twenty two point four x', '0DTE' -> 'zero D T E'."""
+    return _speak_number(match.group(1)) + " " + _spell_letters(match.group(2))
+
+
+def _expand_alpha_id(match: re.Match[str]) -> str:
+    """Letters-then-digits id: 'DU3317391' -> 'D U three three one ...'."""
+    return _spell_letters(match.group(1)) + " " + _digits_to_words(match.group(2))
+
+
+def _expand_signed(match: re.Match[str]) -> str:
+    sign = "plus " if match.group(1) == "+" else "minus "
+    return sign + _speak_number(match.group(2))
+
+
 def normalize_tts_text(text: str) -> str:
     """Return text shaped for more reliable XTTS pronunciation."""
+    if text is None:
+        return ""
     out = str(text)
     out = out.replace("&", " and ")
     out = re.sub(r"(?<=[A-Za-z])-(?=[A-Za-z])", " ", out)
@@ -138,9 +202,18 @@ def normalize_tts_text(text: str) -> str:
     for source, spoken in _ACRONYMS.items():
         out = re.sub(rf"\b{re.escape(source)}\b", spoken, out)
 
+    # Signed/unsigned percentages before any other number handling so the
+    # sign and the % both speak: "+1.25%" -> "plus one point two five percent".
+    out = re.sub(r"(?<![\w.])([+-]?)(\d[\d,]*(?:\.\d+)?)\s*%", _expand_percent, out)
     out = re.sub(r"\$(\d[\d,]*)(?:\.(\d{1,2}))?", _expand_currency, out)
     out = re.sub(r"\b(\d{1,2}):(\d{2})\s*([AaPp][Mm])\b", _expand_time, out)
     out = re.sub(r"\b(\d{3})-(\d{3})-(\d{4})\b", _expand_phone, out)
+    out = re.sub(r"\b(\d{1,2})/(\d{1,2})/(\d{2,4})\b", _expand_date, out)
+    # Alphanumeric domain tokens: digits+letters then letters+digits.
+    out = re.sub(r"(?<![\w.])(\d+(?:\.\d+)?)([A-Za-z]+)\b", _expand_num_suffix, out)
+    out = re.sub(r"\b([A-Za-z]+)(\d+)\b", _expand_alpha_id, out)
+    # Standalone signed numbers (sign not glued to a preceding word/number).
+    out = re.sub(r"(?<![\w.])([+-])(\d[\d,]*(?:\.\d+)?)", _expand_signed, out)
     out = re.sub(r"\b\d[\d,]*(?:\.\d+)?\b", _expand_number, out)
     out = re.sub(r"[ \t]+", " ", out)
     out = re.sub(r"\s+([.,!?;:])", r"\1", out)
