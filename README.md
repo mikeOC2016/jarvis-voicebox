@@ -20,3 +20,8 @@ See voice_tts/docs/ for the adapter design docs.
 ## Review
 
 This repo is staged for external code review (Greptile) plus internal Rule 23 triple-review (Cursor + Codex GPT-5.5).
+
+
+## Status
+
+Active development. Greptile code review enabled on this branch.
